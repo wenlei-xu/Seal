@@ -26,7 +26,7 @@ macOS 构建入口为 `scripts/build-beeftv-release.sh`；正式 Windows 构建�
 
 ## 品牌与发行
 
-[品牌资源](assets/seal/README.md) 使用白色趴卧海豹和小写 seal 字标。当前没有配置 Seal 官网、反馈地址或自动更新源，应用不会使用原产品的更新源升级。发布前需设置自己的签名密钥和更新地址。
+[品牌资源](assets/seal/README.md) 使用白色趴卧海豹和小写 seal 字标。桌面更新使用本仓库的 GitHub Releases，支持后台下载和保存并重启安装，发布流程见 [桌面发布说明](docs/desktop-release.md)。目前先提供 Windows 完整运行包；首个公开稳定版发布前会显示“尚未发布公开更新”。
 
 新安装使用 Seal 数据目录；已存在的 BeefTV 数据目录继续读取，避免丢失工程和配置。内部环境变量、插件格式与部分协议标识保留兼容名称。
 

@@ -175,6 +175,24 @@ function collect(controller: ReturnType<typeof createDesktopUpdateController>) {
     };
 }
 
+test('automatic background download never installs or saves the workspace', async () => {
+    const mock = mockBinding(state({ status: 'available', latestVersion: 'v1.5.2' }));
+    mock.holdDownload();
+    let saved = 0;
+    const controller = createDesktopUpdateController({ getBinding: () => mock.binding, isDesktopRuntime: () => true,
+        autoDownload: () => true, persistWorkspace: async () => { saved++; }, scheduler: { interval: () => () => {} } });
+    try {
+        await controller.start();
+        expect(mock.calls.download).toBe(1);
+        mock.finishDownload(state({ status: 'ready', latestVersion: 'v1.5.2' }));
+        await Promise.resolve(); await Promise.resolve();
+        expect(mock.calls.install).toBe(0);
+        expect(saved).toBe(0);
+        await controller.start();
+        expect(mock.calls.download).toBe(1);
+    } finally { controller.dispose(); }
+});
+
 describe("desktop update progress", () => {
     test("reads speed and reconnect state from the native contract", () => {
         const parsed = parseDesktopUpdateState({ status: "downloading", downloadedBytes: 10, totalBytes: 20, bytesPerSecond: "2048", reconnecting: true });

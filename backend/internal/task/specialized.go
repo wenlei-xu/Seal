@@ -129,6 +129,8 @@ func (s *Service) CreateTimelineTranscriptionTask(userID string, req TimelineTra
 		return nil, kernel.BadAuthRequest(OnlyAudioVideoTranscriptionMessage)
 	}
 	input, err := marshalLocalExecutorInput(TimelineTranscriptionInput{
+		Route:      req.Route,
+		RuntimeKey: req.RuntimeKey,
 		ResourceID: resourceID,
 		Language:   strings.TrimSpace(req.Language),
 	})

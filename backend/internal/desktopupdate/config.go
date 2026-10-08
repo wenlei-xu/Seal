@@ -2,6 +2,7 @@ package desktopupdate
 
 import (
 	"crypto/ed25519"
+	_ "embed"
 	"encoding/base64"
 	"net/url"
 	"runtime"
@@ -10,22 +11,26 @@ import (
 
 // Link-time variables. Release builds inject an HTTPS feed and a base64 raw
 // 32-byte Ed25519 public key. Both empty disables the updater.
+//
+//go:embed seal-update-public-key.txt
+var bundledPublicKey string
+
 var (
-	FeedURL   = ""
-	PublicKey = ""
+	FeedURL   = "https://github.com/wenlei-xu/Seal/releases/latest/download/desktop-update.json"
+	PublicKey = strings.TrimSpace(bundledPublicKey)
 )
 
 const (
 	helperFlag     = "--beeftv-update-helper"
-	appBundleName  = "BeefTV.app"
-	windowsExeName = "BeefTV.exe"
+	appBundleName  = "Seal.app"
+	windowsExeName = "Seal.exe"
 	pluginDirName  = "plugin-packages"
 	// 随包 CLI：外部 Agent 的接入入口，升级包里必须带上，否则升级一次就断了接入。
 	// 它必须待在自己的 cli 目录里：macOS 与 Windows 的文件名都不分大小写，
-	// beeftv 直接放在主程序旁边会和 BeefTV / BeefTV.exe 撞成同一个文件。
+	// seal 直接放在主程序旁边会和 Seal / Seal.exe 撞成同一个文件。
 	cliDirName      = "cli"
-	darwinCLIName   = "beeftv"
-	windowsCLIName  = "beeftv.exe"
+	darwinCLIName   = "seal"
+	windowsCLIName  = "seal.exe"
 	pluginExtension = ".beeftv-plugin"
 	payloadSchema   = 1
 	maxFeedBytes    = 1 << 20

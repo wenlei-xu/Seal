@@ -43,7 +43,7 @@ func main() {
 	_ = os.Remove(startupErrorPath)
 
 	err = wails.Run(&options.App{
-		Title:  "BeefTV",
+		Title:  "Seal",
 		Width:  1440,
 		Height: 960,
 		Mac:    &mac.Options{},
@@ -72,5 +72,9 @@ func defaultDataDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("定位用户应用数据目录: %w", err)
 	}
-	return filepath.Join(root, "BeefTV"), nil
+	legacy := filepath.Join(root, "BeefTV")
+	if info, err := os.Stat(legacy); err == nil && info.IsDir() {
+		return legacy, nil
+	}
+	return filepath.Join(root, "Seal"), nil
 }

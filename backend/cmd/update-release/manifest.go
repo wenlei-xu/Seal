@@ -14,8 +14,8 @@ import (
 
 const (
 	payloadSchema       = 1
-	defaultFeedURL      = "https://updates.beefapi.com/beeftv/desktop-update.json"
-	defaultDownloadHost = "https://updates.beefapi.com/beeftv"
+	defaultFeedURL      = "https://github.com/wenlei-xu/Seal/releases/latest/download/desktop-update.json"
+	defaultDownloadHost = "https://github.com/wenlei-xu/Seal/releases/download"
 	updaterImportPath   = "infinite-canvas/backend/internal/desktopupdate"
 )
 
@@ -51,7 +51,7 @@ func cmdSign(args []string, stdout, stderr io.Writer) error {
 	downloadBase := fs.String("download-base", defaultDownloadHost, "prefix for per-version asset URLs")
 	requirePlatforms := fs.String("require-platforms", "", "comma-separated platforms that must all be present")
 	var assets assetFlags
-	fs.Var(&assets, "asset", "platform=path, repeatable (example: darwin-arm64=/tmp/BeefTV-v1.6.0-darwin-arm64.zip)")
+	fs.Var(&assets, "asset", "platform=path, repeatable (example: darwin-arm64=/tmp/Seal-v1.6.0-darwin-arm64.zip)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

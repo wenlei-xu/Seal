@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -18,24 +17,31 @@ import (
 type timelineTranscriptionInput struct {
 	ResourceID string `json:"resourceId"`
 	Language   string `json:"language"`
+	Route      string `json:"route"`
+	RuntimeKey string `json:"runtimeKey"`
 }
 
 func (w *taskWorkerCoordinator) processTimelineTranscription(task *model.Task, ctx context.Context) error {
 	s := w.service
-	baseURL := strings.TrimSpace(os.Getenv(transcription.BaseURLEnv))
-	if baseURL == "" {
-		return w.failTimelineTask(task, "转写失败", "未配置本地转写服务：请设置 CANVAS_WHISPER_BASE_URL 指向 whisper.cpp 服务")
-	}
 	var input timelineTranscriptionInput
 	if err := json.Unmarshal([]byte(task.InputJSON), &input); err != nil || strings.TrimSpace(input.ResourceID) == "" {
 		return w.failTimelineTask(task, "转写失败", "任务缺少有效的资源引用")
+	}
+	route, key, settings, err := transcription.ResolveConfiguredRoute(s.dataDir, input.Route)
+	if err != nil {
+		return w.failTimelineTask(task, "转写失败", err.Error())
+	}
+	if input.RuntimeKey != "" && key != input.RuntimeKey {
+		return w.failTimelineTask(task, "转写配置变化", "识别运行包或服务配置已变化，请重新提交识别")
 	}
 	if err := s.RequireFeature(FeatureTimelineTranscription); err != nil {
 		return w.failTimelineTask(task, "转写失败", "字幕转写暂未开放")
 	}
 	s.logInfo(task.UserID, task.ID, "时间线转写任务开始", "")
 
-	result, err := s.transcriptionExecutor(task.UserID, baseURL).Run(ctx, input.ResourceID, input.Language, func(stage string, percent int) error {
+	executor := s.transcriptionExecutor(task.UserID, "")
+	executor.Client = transcription.ConfiguredClient(route, settings)
+	result, err := executor.Run(ctx, input.ResourceID, input.Language, func(stage string, percent int) error {
 		return w.progress(task, stage, percent)
 	})
 	if err != nil {

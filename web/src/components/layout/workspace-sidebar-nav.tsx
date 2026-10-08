@@ -1,4 +1,4 @@
-import { ChevronRight, Home, PanelLeftClose, PanelLeftOpen, Plug, Plus, Settings2, Sun, Moon } from "lucide-react";
+import { ChevronRight, Clapperboard, Home, PanelLeftClose, PanelLeftOpen, Plug, Plus, Puzzle, Settings2, Sun, Moon } from "lucide-react";
 import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
@@ -48,6 +48,8 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
             items: [
                 { id: "home", title: "首页", icon: Home, to: "/" },
                 { ...toolItem("canvas", "/project"), title: "项目" },
+                { id: "editing", title: "剪辑", icon: Clapperboard, to: "/editing" },
+                { id: "skills", title: "Skill Hub", icon: Puzzle, to: "/skills" },
                 { ...toolItem("assets", "/assets"), title: "资产" },
                 { id: "settings:channels", title: "模型配置", icon: Settings2, to: "/settings?section=channels" },
                 { id: "agents", title: "外部 Agent", icon: Plug, to: "/agents" },
@@ -62,6 +64,7 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
 
 function WorkspaceSwitcher({ collapsed, onNavigate, onExpand, onCollapse }: { collapsed: boolean; onNavigate: () => void; onExpand: () => void; onCollapse: () => void }) {
     const appearance = useAppearanceStore((state) => state.appearance);
+    const theme = useThemeStore((state) => state.theme);
 
     if (collapsed) {
         return (
@@ -77,9 +80,9 @@ function WorkspaceSwitcher({ collapsed, onNavigate, onExpand, onCollapse }: { co
         <div className="app-workspace-sidebar-brand-row relative shrink-0 px-3 pt-3">
             <Link to="/" onClick={onNavigate} className="app-workspace-sidebar-brand-button group" aria-label={`${appearance.brandName}首页`}>
                 <span className="flex min-w-0 items-center gap-2">
-                    <BrandLogoFrame className="app-workspace-brand-mark grid size-8 shrink-0 place-items-center rounded-[var(--r-sm)] shadow-sm" logoClassName="size-5 object-contain" alt="" fallback={<span className="app-workspace-brand-placeholder" aria-hidden>B</span>} />
+                    <BrandLogoFrame className="app-workspace-brand-mark grid h-8 w-11 shrink-0 place-items-center" logoClassName="h-6 w-10 object-contain" alt="" fallback={<span className="app-workspace-brand-placeholder" aria-hidden>S</span>} />
                     <span className="flex min-w-0">
-                        <span className="app-workspace-brand-wordmark truncate text-[var(--fs-body)] leading-none font-semibold">{appearance.brandName}</span>
+                        {appearance.brandName === "Seal" && !appearance.logoConfigured ? <img src={`/brand/seal-wordmark-${theme === "light" ? "black" : "white"}.svg`} className="h-6 w-auto" alt="Seal" /> : <span className="app-workspace-brand-wordmark truncate text-[var(--fs-body)] leading-none font-semibold">{appearance.brandName}</span>}
                     </span>
                 </span>
             </Link>

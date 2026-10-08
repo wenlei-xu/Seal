@@ -1,129 +1,90 @@
 import { App, Button } from "antd";
-import { ArrowLeft, RadioTower } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { ArrowLeft, Film, Image, Mic, Speech, Type } from "lucide-react";
+import { useLayoutEffect, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-
+import { PageHeader } from "@/components/layout/workspace-page";
+import { MODEL_CHANNEL_CATEGORIES, channelModelsForCapability, type ModelChannelCategory } from "@/lib/model-channel-settings";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { ChannelSettingsPane, channelValidationError, focusInvalidChannelField, isChannelReady } from "./channel-settings-pane";
-import { ModelDefaultGrid } from "./model-default-grid";
+import { flushModelConfig, getModelConfigPersistenceState } from "@/services/model-config-repository";
+import { ChannelSettingsPane, isChannelReady } from "./channel-settings-pane";
+import { ModelChannelDefaults } from "./model-channel-defaults";
+import { AsrSettingsPane } from "./asr-settings-pane";
+import { VoiceSettingsPane } from "./voice-settings-pane";
+import "./model-channel-settings.css";
 
-type ConfigSectionKey = "channels" | "models";
-
-const configSections: Array<{ key: ConfigSectionKey; label: string; description: string; icon: ReactNode }> = [
-    { key: "channels", label: "个人渠道", description: "模型服务与个人工作流", icon: <RadioTower className="size-4" /> },
-];
-
-export function isConfigSection(value: string | null): value is ConfigSectionKey {
-    return configSections.some((section) => section.key === value);
+export function isConfigSection(value: string | null): value is "channels" | "models" {
+    return value === "channels" || value === "models";
 }
 
 export default function SettingsPage() {
     const { message } = App.useApp();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
-    const requestedSection = searchParams.get("section");
+    const requested = searchParams.get("capability");
+    const category: ModelChannelCategory = MODEL_CHANNEL_CATEGORIES.find((item) => item.value === requested)?.value || "text";
     const customChannelsEnabled = useUserStore((state) => state.features.customChannelsEnabled);
-    const initialSection = isConfigSection(requestedSection) ? requestedSection : "channels";
-    const [activeTab, setActiveTab] = useState<ConfigSectionKey>(initialSection === "models" ? "channels" : initialSection);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const shouldPromptContinue = searchParams.get("continue") === "1";
-    const userChannels = config.channels.filter((channel) => channel.scope !== "system");
-    const visibleConfigSections = useMemo(() => customChannelsEnabled ? configSections : configSections.filter((section) => section.key !== "channels"), [customChannelsEnabled]);
-
-    const isVisibleConfigSection = (value: string | null): value is ConfigSectionKey => isConfigSection(value) && visibleConfigSections.some((section) => section.key === value);
+    const icons = { text: Type, image: Image, video: Film, audio: Speech, asr: Mic };
 
     useLayoutEffect(() => {
         document.body.classList.add("app-user-overlays");
         return () => document.body.classList.remove("app-user-overlays");
     }, []);
 
-    useEffect(() => {
-        if (isVisibleConfigSection(requestedSection)) {
-            setActiveTab(requestedSection);
-            return;
-        }
-        setActiveTab((current) => visibleConfigSections.some((section) => section.key === current) ? current : "channels");
-    }, [customChannelsEnabled, requestedSection, visibleConfigSections]);
-
-    const selectSection = (section: ConfigSectionKey) => {
-        setActiveTab(section);
+    const selectCategory = (value: ModelChannelCategory) => {
         const next = new URLSearchParams(searchParams);
-        next.set("section", section);
+        next.set("capability", value);
         setSearchParams(next, { replace: true });
     };
-
-    const finishConfig = () => {
-        const invalidChannel = customChannelsEnabled ? userChannels.find((channel) => channelValidationError(channel)) : undefined;
-        if (invalidChannel) {
-            selectSection("channels");
-            message.warning(`${invalidChannel.name || "未命名渠道"}：${channelValidationError(invalidChannel)}`);
-            focusInvalidChannelField(invalidChannel);
+    const navigateTabs = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+        let target: number;
+        if (event.key === "ArrowRight") target = (index + 1) % MODEL_CHANNEL_CATEGORIES.length;
+        else if (event.key === "ArrowLeft") target = (index + MODEL_CHANNEL_CATEGORIES.length - 1) % MODEL_CHANNEL_CATEGORIES.length;
+        else if (event.key === "Home") target = 0;
+        else if (event.key === "End") target = MODEL_CHANNEL_CATEGORIES.length - 1;
+        else return;
+        event.preventDefault();
+        const next = MODEL_CHANNEL_CATEGORIES[target].value;
+        selectCategory(next);
+        document.getElementById(`model-channel-tab-${next}`)?.focus();
+    };
+    const finishConfig = async () => {
+        if (!effectiveConfig.channels.some((channel) => channel.enabled !== false && isChannelReady(channel))) {
+            message.warning("请先添加并启用至少一个已配置模型的渠道");
             return;
         }
-        if (!effectiveConfig.channels.some(isChannelReady)) {
-            selectSection("channels");
-            message.error(customChannelsEnabled ? (shouldPromptContinue ? "请先完成至少一个渠道的 Base URL、API Key 和模型配置" : "当前没有可用渠道，请先完成连接信息和模型配置") : "当前没有可用的系统模型，请联系管理员配置系统渠道");
-            return;
-        }
-        message.success("配置已保存，正在返回创作页面");
-        navigate(-1);
+        try {
+            await flushModelConfig();
+            const state = getModelConfigPersistenceState();
+            if (state.status === "error" || state.dirty) throw new Error(state.error || "配置尚未保存，请重试");
+            message.success("配置已保存，正在返回创作页面");
+            navigate(-1);
+        } catch (error) { message.error(error instanceof Error ? error.message : "保存失败，请重试"); }
     };
 
-    const panes: Record<ConfigSectionKey, ReactNode> = {
-        channels: (
-            <SettingsPane>
-                <ChannelSettingsPane />
-                <div className="settings-section mt-4">
-                    <div className="settings-pane-header">
-                        <div className="min-w-0">
-                            <h2>模型选择</h2>
-                        </div>
-                    </div>
-                    <ModelDefaultGrid config={effectiveConfig} onChange={(key, model) => updateConfig(key, model)} />
+    return <main className="settings-page app-workspace-page app-user-workspace app-section-page flex h-full min-h-0 flex-col text-foreground">
+        <div className="app-workspace-scroll app-section-page-content min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div className="model-settings-workspace">
+                <PageHeader title="模型配置" description="按创作用途管理渠道与模型" actions={shouldPromptContinue ? <div className="flex gap-2"><Button icon={<ArrowLeft size={15} />} onClick={() => navigate(-1)}>返回创作</Button><Button type="primary" onClick={() => void finishConfig()}>保存并返回</Button></div> : undefined} />
+                <div className="model-channel-tabs" role="tablist" aria-label="渠道类型">
+                    {MODEL_CHANNEL_CATEGORIES.map((item, index) => {
+                        const Icon = icons[item.value];
+                        const count = item.value === "asr" ? null : config.channels.filter((channel) => channel.scope !== "system" && channelModelsForCapability(channel, item.value).length > 0).length;
+                        return <button id={`model-channel-tab-${item.value}`} key={item.value} type="button" className="model-channel-tab" role="tab" aria-selected={category === item.value} aria-controls="model-channel-panel" tabIndex={category === item.value ? 0 : -1} onClick={() => selectCategory(item.value)} onKeyDown={(event) => navigateTabs(event, index)}><Icon aria-hidden="true" />{item.label}{count !== null && <span>{count}</span>}</button>;
+                    })}
                 </div>
-            </SettingsPane>
-        ),
-        models: (
-            <SettingsPane>
-                <div className="settings-pane-header">
-                    <div className="min-w-0">
-                        <h2>模型选择</h2>
-                        <p>按领域选择默认模型；模型能力与请求协议在渠道“模型与能力”中配置。</p>
-                    </div>
-                </div>
-                <div className="settings-section">
-                            <ModelDefaultGrid config={effectiveConfig} onChange={(key, model) => updateConfig(key, model)} onOpenChannels={customChannelsEnabled ? () => selectSection("channels") : undefined} />
-                </div>
-            </SettingsPane>
-        ),
-    };
-
-    return (
-        <main className="settings-page app-workspace-page app-user-workspace app-section-page flex h-full min-h-0 flex-col text-foreground">
-            {shouldPromptContinue ? (
-                <div className="settings-topbar shrink-0">
-                    <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-                        <Button icon={<ArrowLeft className="size-4" />} onClick={() => navigate(-1)}>返回创作</Button>
-                        <Button type="primary" onClick={finishConfig}>保存并返回</Button>
-                    </div>
-                </div>
-            ) : null}
-            <div className="settings-library-frame flex min-h-0 flex-1 flex-col md:flex-row">
-                <section className="settings-content flex min-h-0 min-w-0 flex-1 flex-col">
-                    <div className="app-workspace-scroll app-section-page-content min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                        <div className="settings-pane-root mx-auto w-full max-w-none">
-                            {panes[activeTab]}
-                        </div>
-                    </div>
+                <section id="model-channel-panel" role="tabpanel" aria-labelledby={`model-channel-tab-${category}`}>
+                    {category === "asr" ? <AsrSettingsPane /> : <>
+                        <ModelChannelDefaults config={effectiveConfig} capability={category} onChange={(key, model) => updateConfig(key, model)} />
+                        {category === "audio" && <VoiceSettingsPane />}
+                        {customChannelsEnabled ? <ChannelSettingsPane key={category} capability={category} /> : <p className="mt-5 text-xs text-foreground/55">模型服务由系统管理，可在上方选择默认模型。</p>}
+                    </>}
                 </section>
             </div>
-        </main>
-    );
-}
-
-function SettingsPane({ children, fill = false }: { children: ReactNode; fill?: boolean }) {
-    return <div className={fill ? "settings-pane h-full" : "settings-pane"}>{children}</div>;
+        </div>
+    </main>;
 }

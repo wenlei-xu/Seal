@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 13
+const CurrentSchemaVersion int64 = 17
 
 type localSchemaMigration struct {
 	Version   int64 `gorm:"primaryKey;autoIncrement:false"`
@@ -50,8 +50,10 @@ func LocalModels() []any {
 		&model.CloudAgentExecution{}, &model.CloudAgentCanvasMutation{}, &model.AgentProfile{}, &model.AgentLesson{}, &model.AgentMemorySetting{},
 		&model.PluginPlatformState{}, &model.UserPluginState{},
 		&model.Skill{}, &model.SkillVersion{}, &model.SkillFile{}, &model.UserSkillState{},
+		&model.SkillRuntimeRevision{},
 		&model.Resource{}, &model.ResourceDeletionJob{}, &model.UserDailyUploadUsage{}, &model.UserUploadReservation{}, &model.ArkPrivateAssetBinding{},
 		&model.Asset{}, &model.AssetFolder{}, &model.AssetVersion{}, &model.AssetRepresentation{},
+		&model.EditingAssetReference{}, &model.EditingProject{},
 		&model.ProjectAssetLink{}, &model.ProjectAssetFolder{}, &model.ProjectAssetCandidate{},
 		&model.VoiceProfile{}, &model.CharacterVoiceBinding{},
 		&model.Project{}, &model.ProjectFolder{}, &model.StyleProfile{}, &model.ProjectUnit{}, &model.CanvasUnitLink{},
@@ -59,6 +61,7 @@ func LocalModels() []any {
 		&model.WorkflowTemplateVersion{}, &model.WorkflowInstance{}, &model.WorkflowStepInstance{}, &model.WorkflowStepTask{}, &model.ProductionTaskLink{},
 		&model.CanvasProject{}, &model.CanvasSnapshot{}, &model.CanvasSnapshotResource{}, &model.AgentOpRecord{},
 		&model.AssistantTurn{},
+		&model.AssistantMediaProposal{},
 		&model.CreationConversation{},
 		&model.CanvasLibraryFolder{}, &model.CanvasDrawing{},
 		&model.PromptTemplate{}, &model.UserPromptCustomization{},
@@ -87,6 +90,10 @@ func canonicalLocalMigrations() []localMigration {
 		{version: 11, name: "creation-conversations", apply: migrateCreationConversations},
 		{version: 12, name: "canvas-library-drawings", apply: migrateCanvasLibrarySchema},
 		{version: 13, name: "upload-reservation-witness", apply: migrateUploadReservationWitness},
+		{version: 14, name: "editing-asset-references", apply: func(tx *gorm.DB) error { return tx.AutoMigrate(&model.EditingAssetReference{}) }},
+		{version: 15, name: "standalone-editing-projects", apply: func(tx *gorm.DB) error { return tx.AutoMigrate(&model.EditingProject{}) }},
+		{version: 16, name: "local-skill-hub", apply: func(tx *gorm.DB) error { return tx.AutoMigrate(&model.UserSkillState{}, &model.SkillRuntimeRevision{}) }},
+		{version: 17, name: "assistant-media-proposals", apply: func(tx *gorm.DB) error { return tx.AutoMigrate(&model.AssistantMediaProposal{}) }},
 	}
 }
 
@@ -393,6 +400,9 @@ func RequireLocalSchema(db *gorm.DB) error {
 	if version >= 13 && !db.Migrator().HasTable(&model.UserUploadReservation{}) {
 		return fmt.Errorf("本地工作区数据库结构缺失，请启用自动迁移")
 	}
+	if version >= 14 && !db.Migrator().HasTable(&model.EditingAssetReference{}) {
+		return errors.New("本地数据库缺少剪辑素材引用表")
+	}
 	if version != CurrentSchemaVersion {
 		return fmt.Errorf("本地工作区数据库版本为 %d，期望 %d，请启用自动迁移", version, CurrentSchemaVersion)
 	}
@@ -464,6 +474,19 @@ func requireReconciledSchema(db *gorm.DB) error {
 		}
 	}
 	if version >= 12 {
+		if version >= 17 {
+			if !db.Migrator().HasTable(&model.AssistantMediaProposal{}) {
+				return fmt.Errorf("本地助手生成提议表缺失")
+			}
+			for _, column := range []string{"id", "user_id", "project_id", "kind", "prompt", "model", "model_key", "config_revision", "task_id", "created_at", "updated_at"} {
+				if !db.Migrator().HasColumn(&model.AssistantMediaProposal{}, column) {
+					return fmt.Errorf("本地助手生成提议列 %s 缺失", column)
+				}
+			}
+		}
+		if version >= 15 && !db.Migrator().HasTable(&model.EditingProject{}) {
+			return fmt.Errorf("本地独立剪辑工程表缺失")
+		}
 		return requireCanvasLibrarySchema(db)
 	}
 	return nil

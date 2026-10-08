@@ -8,15 +8,24 @@ import (
 const BaseURLEnv = "CANVAS_WHISPER_BASE_URL"
 
 type Segment struct {
-	StartMs int64  `json:"startMs"`
-	EndMs   int64  `json:"endMs"`
-	Text    string `json:"text"`
+	StartMs int64   `json:"startMs"`
+	EndMs   int64   `json:"endMs"`
+	Text    string  `json:"text"`
+	Tokens  []Token `json:"tokens,omitempty"`
+}
+
+type Token struct {
+	StartMs     int64   `json:"startMs"`
+	EndMs       int64   `json:"endMs"`
+	Text        string  `json:"text"`
+	Probability float64 `json:"probability,omitempty"`
 }
 
 type Result struct {
-	Segments []Segment `json:"segments"`
-	SRT      string    `json:"srt"`
-	Language string    `json:"language"`
+	Segments    []Segment `json:"segments"`
+	SRT         string    `json:"srt"`
+	Language    string    `json:"language"`
+	TimingLevel string    `json:"timingLevel"`
 }
 
 type Media struct {

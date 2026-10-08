@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"infinite-canvas/backend/internal/releasebundle"
 )
 
 const testCommit = "0123456789abcdef0123456789abcdef01234567"
@@ -35,6 +37,7 @@ func TestSignVerifyRoundTripAndTamper(t *testing.T) {
 	var stdout bytes.Buffer
 	args := []string{
 		"sign",
+		"--download-base", "https://example.com/seal",
 		"--version", "v1.6.0",
 		"--commit", testCommit,
 		"--changelog", notesPath,
@@ -84,7 +87,7 @@ func TestSignVerifyRoundTripAndTamper(t *testing.T) {
 		t.Fatalf("notes %q", body.Notes)
 	}
 	asset := body.Platforms[platformDarwinARM64]
-	if asset.URL != "https://updates.beefapi.com/beeftv/v1.6.0/BeefTV-v1.6.0-darwin-arm64.zip" {
+	if asset.URL != "https://example.com/seal/v1.6.0/Seal-v1.6.0-darwin-arm64.zip" {
 		t.Fatalf("url %q", asset.URL)
 	}
 	if asset.Size <= 0 || len(asset.SHA256) != 64 {
@@ -149,7 +152,7 @@ func TestSignRejectsInvalidInputs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := run(tc.args, ioDiscard{}, ioDiscard{})
+			err := run(append(tc.args, "--download-base", "https://example.com/seal"), ioDiscard{}, ioDiscard{})
 			if err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.want)) {
 				t.Fatalf("expected error containing %q, got %v", tc.want, err)
 			}
@@ -172,12 +175,20 @@ func TestSignRejectsInvalidInputs(t *testing.T) {
 
 func TestPrintLdflags(t *testing.T) {
 	public := encodeKey(bytes.Repeat([]byte{1}, ed25519.PublicKeySize))
+	t.Setenv("BEEFTV_UPDATER_FEED_URL", "")
 	var stdout bytes.Buffer
 	if err := run([]string{"print-ldflags", "--public-key", public}, &stdout, ioDiscard{}); err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(stdout.String(), "FeedURL="+defaultFeedURL) {
+		t.Fatal("missing owned GitHub feed")
+	}
+	stdout.Reset()
+	if err := run([]string{"print-ldflags", "--public-key", public, "--feed-url", "https://example.com/desktop-update.json"}, &stdout, ioDiscard{}); err != nil {
+		t.Fatal(err)
+	}
 	got := strings.TrimSpace(stdout.String())
-	if !strings.Contains(got, "infinite-canvas/backend/internal/desktopupdate.FeedURL="+defaultFeedURL) {
+	if !strings.Contains(got, "infinite-canvas/backend/internal/desktopupdate.FeedURL=https://example.com/desktop-update.json") {
 		t.Fatalf("missing feed ldflag: %s", got)
 	}
 	if !strings.Contains(got, "infinite-canvas/backend/internal/desktopupdate.PublicKey="+public) {
@@ -209,17 +220,21 @@ func packageNamed(t *testing.T, dir, platform, version string) string {
 			t.Fatal(err)
 		}
 		writer := zip.NewWriter(file)
-		for name, body := range map[string]string{
-			"BeefTV.app/Contents/MacOS/BeefTV":                                                                   "binary",
-			"BeefTV.app/Contents/MacOS/cli/beeftv":                                                               "cli",
-			"BeefTV.app/Contents/Info.plist":                                                                     "<plist></plist>",
-			"BeefTV.app/Contents/Resources/plugin-packages/core.beeftv-plugin":                                   "plugin",
-			"BeefTV.app/Contents/Resources/agent-host/server.mjs":                                                "host",
-			"BeefTV.app/Contents/Resources/agent-host/session-identity.mjs":                                      "identity",
-			"BeefTV.app/Contents/Resources/agent-host/package.json":                                              "{}",
-			"BeefTV.app/Contents/Resources/agent-host/runtime/bin/node":                                          "node",
-			"BeefTV.app/Contents/Resources/agent-host/node_modules/@earendil-works/pi-coding-agent/package.json": "{}",
-		} {
+		files := map[string]string{
+			"Seal.app/Contents/MacOS/Seal":                                                                     "binary",
+			"Seal.app/Contents/MacOS/cli/seal":                                                                 "cli",
+			"Seal.app/Contents/Info.plist":                                                                     "<plist></plist>",
+			"Seal.app/Contents/Resources/plugin-packages/core.beeftv-plugin":                                   "plugin",
+			"Seal.app/Contents/Resources/agent-host/server.mjs":                                                "host",
+			"Seal.app/Contents/Resources/agent-host/session-identity.mjs":                                      "identity",
+			"Seal.app/Contents/Resources/agent-host/package.json":                                              "{}",
+			"Seal.app/Contents/Resources/agent-host/runtime/bin/node":                                          "node",
+			"Seal.app/Contents/Resources/agent-host/node_modules/@earendil-works/pi-coding-agent/package.json": "{}",
+		}
+		for _, name := range releasebundle.EditingFiles(platform) {
+			files["Seal.app/Contents/Resources/edit-host/"+name] = "editing"
+		}
+		for name, body := range files {
 			header := &zip.FileHeader{Name: name, Method: zip.Deflate}
 			header.SetMode(0o755)
 			entry, err := writer.CreateHeader(header)
@@ -244,7 +259,7 @@ func packageNamed(t *testing.T, dir, platform, version string) string {
 	}
 	switch platform {
 	case platformDarwinARM64, platformDarwinAMD64:
-		writeFakeDarwinApp(t, filepath.Join(input, "BeefTV.app"))
+		writeFakeDarwinApp(t, filepath.Join(input, "Seal.app"))
 	case platformWindowsAMD64:
 		writeFakeWindowsBin(t, input)
 	}

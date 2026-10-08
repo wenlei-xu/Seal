@@ -8,6 +8,8 @@ import (
 	"infinite-canvas/backend/internal/assistantturns"
 	"infinite-canvas/backend/internal/canvas"
 	"infinite-canvas/backend/internal/operations"
+	"infinite-canvas/backend/internal/repository"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -115,14 +117,24 @@ func (f assistantCanvasFactory) BoundTo(tx *gorm.DB) assistantturns.CanvasSessio
 		return nil
 	}
 	if tx == nil {
-		return assistantCanvasSession{canvas: f.service.canvasDomain()}
+		return assistantCanvasSession{canvas: f.service.canvasDomain(), edits: f.service.repo}
 	}
-	return assistantCanvasSession{canvas: f.service.canvasDomainWithTx(tx)}
+	return assistantCanvasSession{canvas: f.service.canvasDomainWithTx(tx), edits: repository.New(tx)}
 }
 
-type assistantCanvasSession struct{ canvas *canvas.Service }
+type assistantCanvasSession struct {
+	canvas *canvas.Service
+	edits  *repository.Repository
+}
 
 func (s assistantCanvasSession) UserCanvasProject(userID, canvasID string) (json.RawMessage, error) {
+	if strings.HasPrefix(canvasID, "cut_") {
+		item, err := s.edits.EditingProjectForUser(userID, canvasID)
+		if err != nil {
+			return nil, err
+		}
+		return editingAssistantDocument(item)
+	}
 	return s.canvas.UserCanvasProject(userID, canvasID)
 }
 

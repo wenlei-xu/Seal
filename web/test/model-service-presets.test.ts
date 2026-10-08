@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { serviceConnectionError, serviceModelProfile, modelCatalogRequestURL } from "../src/lib/model-service-presets";
+import { serviceConnectionError, serviceModelProfile, modelCatalogRequestURL, modelServicePresetsFor, modelServicePresetConnection } from "../src/lib/model-service-presets";
 import { modelConnectionResultDetail, testChannelModelConnection } from "../src/lib/model-connection-test";
 import { applyFetchedChannelModelCatalog, modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
 import { backendProviderConfig } from "../src/services/api/generation-task";
@@ -12,6 +12,16 @@ const protocols = [
     ["chat-completion", "text"], ["gemini-generate-content", "text"], ["gemini-image", "image"],
     ["volcengine-ark-video", "video"], ["newapi", "video"],
 ].map(([value, capability]) => ({ value, capability, enabled: true } as ModelProtocolDefinition));
+
+test("supplier presets are category-specific and Bailian text does not use its native media endpoint", () => {
+    expect(modelServicePresetsFor("text").map(p => p.name)).toContain("火山方舟");
+    expect(modelServicePresetsFor("image").filter(p => p.id !== "compatible").map(p => p.name)).toEqual(["OpenAI", "Google", "阿里百炼", "火山方舟"]);
+    expect(new Set(modelServicePresetsFor("video").filter(p => p.id !== "compatible").map(p => p.name))).toEqual(new Set(["火山方舟", "可灵", "MiniMax", "阿里百炼", "Google", "Vidu"]));
+    const bailian = modelServicePresetsFor("text").find(p => p.id === "bailian")!;
+    expect(modelServicePresetConnection(bailian, "text").baseUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1");
+    expect(modelServicePresetConnection(bailian, "video").baseUrl).toBe("https://dashscope.aliyuncs.com");
+    expect(modelServicePresetsFor("audio").map(p => p.id)).toEqual(["compatible", "openai", "doubao-tts", "xfyun-tts"]);
+});
 
 test("persisted boolean video options are normalized without turning false back on", () => {
     const channel = createModelChannel({ id: "custom", models: ["seedance-2.0-mini"], modelProfiles: [{ model: "seedance-2.0-mini", capability: "video", protocol: "newapi" }] });
@@ -61,7 +71,7 @@ test("native provider models use installed native adapters and never invent a mi
     const regionalArk = { ...ark, baseUrl: "https://ark.cn-shanghai.volces.com/api/v3" };
     expect(serviceModelProfile(regionalArk, { id: "endpoint-abc" }, protocols, "video").protocol).toBe("volcengine-ark-video");
     const unrelated = { ...ark, baseUrl: "https://ark.cn-shanghai.volces.com.example.org/api/v3" };
-    expect(serviceModelProfile(unrelated, { id: "endpoint-abc" }, protocols, "video").protocol).toBe("newapi");
+    expect(serviceModelProfile(unrelated, { id: "endpoint-abc" }, protocols, "video").protocol).toBeUndefined();
 });
 
 test("refresh keeps selected/manual models and user capability limits", () => {

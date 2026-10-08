@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterCanvasAPI is kept as the standalone-development entrypoint. BeefTV
+// RegisterCanvasAPI is kept as the standalone-development entrypoint. Seal
 // has one local-only HTTP surface, so development and Wails use the same route
 // graph instead of selecting between desktop and SaaS profiles at runtime.
 func RegisterCanvasAPI(api *gin.RouterGroup, svc *app.Service) {
@@ -42,7 +42,7 @@ func RegisterDesktopCanvasAPIWithDependencies(api *gin.RouterGroup, svc *app.Ser
 
 // registerDesktopCanvasAPI is deliberately a separate call graph. Keeping the
 // local composition root free of runtime profile branches lets the Go linker
-// discard hosted handlers and their SaaS-only service methods from BeefTV.
+// discard hosted handlers and their SaaS-only service methods from Seal.
 func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependencies RuntimeDependencies) {
 	// A process supervisor needs an explicit Close owner. Only the composition
 	// root supplies it; standalone route registration must not create a child
@@ -63,6 +63,9 @@ func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependenci
 	RegisterTaskRoutes(api, svc, false)
 	RegisterRunningHubRoutes(api, svc, false)
 	RegisterDesktopSkillRoutes(api, svc)
+	RegisterSkillHubRoutes(api, svc, dependencies.AssistantHost)
+	RegisterAssistantCreatorRoutes(api, svc, dependencies.AssistantHost)
+	RegisterAssistantMediaRoutes(api, svc)
 	RegisterDesktopUserDataRoutes(api, svc)
 	// 登记表在进程内单实例（避免每请求新建导致并发丢记录）。
 	// 凭据落盘属于组合根职责：路由注册不产生文件副作用。
@@ -79,6 +82,7 @@ func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependenci
 	RegisterAgentProxyRoutes(api, svc, clients, uiSessions, dependencies.AssistantHost)
 	// 宿主生命周期：配置当前文本模型与启动命令，显式启停；未配置时返回明确未就绪。
 	RegisterAgentHostLifecycleRoutes(api, svc, dependencies.AssistantHost)
+	RegisterEditProjectRoutes(api, svc, dependencies.EditHost)
 	RegisterChunkedUploadRoutes(api, svc, false)
 	RegisterDiagnosticsRoutes(api, svc)
 	RegisterPluginRoutes(api, svc, false)

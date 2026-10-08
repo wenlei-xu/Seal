@@ -3,13 +3,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { verifyHyperframesSkills } from './verify-hyperframes-skills.mjs';
+import { verifyCreatorSkills } from './vendor-creator-skills.mjs';
 
 export const NODE_VERSION = '24.15.0';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const targets = { 'darwin/arm64': ['darwin', 'arm64'], 'darwin/amd64': ['darwin', 'x64'], 'windows/amd64': ['win32', 'x64'] };
 const runtimeModules = ['session-identity.mjs', 'canvas-turn.mjs', 'request-budget.mjs', 'durable-request-budget.mjs',
-  'operation-bridge.mjs', 'session-owner.mjs', 'full-control-loader.mjs',
-  'session-settings.mjs', 'lifecycle-events.mjs'];
+  'operation-bridge.mjs', 'edit-bridge.mjs', 'hypit-bridge.mjs', 'hyperframes-bridge.mjs', 'creator-bridge.mjs', 'workflow-journal.mjs', 'hypit-distribution.mjs', 'session-owner.mjs', 'full-control-loader.mjs',
+  'session-settings.mjs', 'lifecycle-events.mjs', 'skill-read-bridge.mjs'];
 const sourceFiles = ['server.mjs', ...runtimeModules, 'package.json', 'bun.lock'];
 
 function run(command, args, cwd) {
@@ -34,6 +36,8 @@ export function verifyRuntime(runtime, target) {
 }
 
 export function packageAgentHost({ runtime, target, destination, source = path.join(root, 'agent-host') }) {
+  verifyHyperframesSkills(path.join(source, 'skills', 'hyperframes'));
+  verifyCreatorSkills(path.join(source, 'skills'));
   const node = verifyRuntime(runtime, target);
   if (!destination) throw new Error('agent-host destination is required');
   for (const name of sourceFiles) {
@@ -42,8 +46,9 @@ export function packageAgentHost({ runtime, target, destination, source = path.j
   const stage = mkdtempSync(path.join(tmpdir(), 'beeftv agent host '));
   try {
     for (const name of sourceFiles) cpSync(path.join(source, name), path.join(stage, name));
+    cpSync(path.join(source, 'skills'), path.join(stage, 'skills'), { recursive: true });
     // Install from the committed lock into a clean tree, never from developer node_modules.
-    run(process.execPath, ['install', '--production', '--frozen-lockfile', '--backend', 'copyfile', '--os', targets[target][0], '--cpu', targets[target][1]], stage);
+    run(process.execPath, ['install', '--production', '--frozen-lockfile', '--backend', 'copyfile', '--network-concurrency', '4', '--os', targets[target][0], '--cpu', targets[target][1]], stage);
     const nodeRelative = target.startsWith('windows/') ? 'runtime/node.exe' : 'runtime/bin/node';
     const bundledNode = path.join(stage, nodeRelative);
     mkdirSync(path.dirname(bundledNode), { recursive: true });

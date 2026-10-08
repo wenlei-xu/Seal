@@ -20,6 +20,9 @@ func RunAudioTask(ctx context.Context, input Input) (map[string]interface{}, err
 	if _, ok := DeclarativeProtocolAdapterForContext(ctx, input.Config.InterfaceType); ok {
 		return RunDeclarativeProtocolTask(ctx, input)
 	}
+	if input.Config.InterfaceType == "doubao-tts" || input.Config.InterfaceType == "xfyun-tts" {
+		return nil, errors.New("当前语音协议插件未安装或已停用，请检查渠道设置")
+	}
 	if resolved, ok := input.Metadata["resolvedCharacterVersions"].([]interface{}); ok && len(resolved) > 0 {
 		voiceKey := metadataString(input.Metadata, "resolvedCharacterVoiceKey")
 		if voiceKey == "" || strings.TrimSpace(input.Config.AudioVoice) != voiceKey {

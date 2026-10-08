@@ -80,6 +80,10 @@ func mergeBuiltinProviderPresets(config map[string]any) (map[string]any, error) 
 
 	for _, preset := range providerpreset.BuiltinChannels() {
 		local := channels[preset.ID]
+		// Existing connections remain usable; new workspaces choose their own provider.
+		if preset.ID == "beefapi" && local == nil {
+			continue
+		}
 		merged, err := presetChannelMap(preset, local)
 		if err != nil {
 			return nil, err

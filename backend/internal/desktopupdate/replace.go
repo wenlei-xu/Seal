@@ -73,15 +73,19 @@ func swapWindows(req HelperRequest) error {
 		return errors.Join(err, restoreWindows(req))
 	}
 	for _, name := range windowsSidecarEntries {
-		if err := retryIO(func() error { return renamePath(filepath.Join(req.StagedPath, name), filepath.Join(targetDir, name)) }); err != nil {
+		staged := filepath.Join(req.StagedPath, name)
+		if !pathExists(staged) {
+			continue
+		}
+		if err := retryIO(func() error { return renamePath(staged, filepath.Join(targetDir, name)) }); err != nil {
 			return errors.Join(err, restoreWindows(req))
 		}
 	}
 	return nil
 }
 
-// windowsSidecarEntries 是 BeefTV.exe 旁边随包发行的资源：升级要整组换，回滚要整组还原。
-var windowsSidecarEntries = []string{pluginDirName, "agent-host", cliDirName}
+// windowsSidecarEntries 是 Seal.exe 旁边随包发行的资源：升级要整组换，回滚要整组还原。
+var windowsSidecarEntries = []string{pluginDirName, "agent-host", "edit-host", cliDirName, "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"}
 
 func restoreWindows(req HelperRequest) error {
 	targetDir := filepath.Dir(req.TargetPath)
@@ -193,7 +197,7 @@ func retryIO(op func() error) error {
 func relaunchTarget(req HelperRequest) error {
 	switch {
 	case strings.HasPrefix(req.Platform, "darwin"):
-		cmd := exec.Command(filepath.Join(req.TargetPath, "Contents", "MacOS", "BeefTV"))
+		cmd := exec.Command(filepath.Join(req.TargetPath, "Contents", "MacOS", "Seal"))
 		cmd.Dir = filepath.Dir(req.TargetPath)
 		if err := cmd.Start(); err != nil {
 			return err

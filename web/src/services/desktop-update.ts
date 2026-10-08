@@ -1,5 +1,6 @@
 import { DESKTOP_UPDATE_STATUSES, getDesktopAppBinding, type DesktopRuntimeBinding, type DesktopUpdateState, type DesktopUpdateStatus } from "@/services/desktop-runtime";
 import { prepareDesktopEditorsForUpdate } from "@/services/desktop-update-preparation";
+import { useDesktopUpdatePreferences } from "@/stores/use-desktop-update-preferences";
 
 export type { DesktopUpdateState, DesktopUpdateStatus };
 
@@ -28,6 +29,7 @@ export type DesktopUpdateControllerOptions = {
     fallbackVersion?: string;
     pollIntervalMs?: number;
     scheduler?: DesktopUpdateScheduler;
+    autoDownload?: () => boolean;
 };
 
 export type DesktopUpdateController = {
@@ -232,6 +234,7 @@ const defaultScheduler: DesktopUpdateScheduler = {
 };
 
 export function createDesktopUpdateController(options: DesktopUpdateControllerOptions = {}): DesktopUpdateController {
+    const autoDownload = options.autoDownload ?? (() => typeof window !== "undefined" && useDesktopUpdatePreferences.getState().autoDownload);
     const getBinding = options.getBinding ?? getDesktopAppBinding;
     const isDesktopRuntime = options.isDesktopRuntime ?? (() => isDesktopUpdateRuntime(getBinding()));
     const persistWorkspace = options.persistWorkspace ?? persistWorkspaceBeforeDesktopInstall;
@@ -338,6 +341,7 @@ export function createDesktopUpdateController(options: DesktopUpdateControllerOp
                 const next = parseDesktopUpdateState(await binding.CheckForUpdate(), quietInitial.currentVersion || fallbackVersion);
                 if (disposed) return;
                 apply(next);
+                if (next.status === "available" && autoDownload()) void download();
             } catch (error) {
                 if (disposed) return;
                 apply({ ...quietInitial, status: "error", error: bindingErrorMessage(error) || "无法检查更新，请检查网络后重试。" });

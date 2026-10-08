@@ -1,4 +1,5 @@
 import { Grid } from "antd";
+import type { EditWorkspaceContext } from "@/services/api/edit-projects";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { scopedLocalStorage } from "@/lib/user-scope";
@@ -21,6 +22,7 @@ import {
     type AgentHostStatus,
     type AssistantSessionSummary,
     type AssistantTurn,
+    type AssistantSkillUse,
     type AssistantUndoFailure,
 } from "@/services/api/agent-assistant";
 import { assistantChangedNodeIds, assistantLifecycleText } from "./canvas-assistant-copy";
@@ -77,12 +79,13 @@ type CanvasRun = {
     recovery: PendingAssistantRecovery | null;
     pendingUserText: string | null;
     pendingSelectedNodeIds: string[];
+    pendingRequestedSkill: AssistantSkillUse | null;
     streamed: string;
     streaming: boolean;
     lifecycleNotice: string | null;
     controller: AbortController | null;
     error: string | null;
-    lastSent: { text: string; selectedNodeIds: string[]; references: AgentChatReference[] } | null;
+    lastSent: { text: string; selectedNodeIds: string[]; references: AgentChatReference[]; selectedSkill?: AssistantSkillUse } | null;
     turnStatus: Record<string, AssistantTurnStatus>;
 };
 
@@ -98,6 +101,7 @@ const createRun = (): CanvasRun => ({
     recovery: null,
     pendingUserText: null,
     pendingSelectedNodeIds: [],
+    pendingRequestedSkill: null,
     streamed: "",
     streaming: false,
     lifecycleNotice: null,
@@ -109,6 +113,7 @@ const createRun = (): CanvasRun => ({
 
 type Options = {
     canvasId: string;
+    getWorkspaceContext?: () => Promise<EditWorkspaceContext>;
     /** 回合落地后画布要立刻拉取最新内容，并把改动过的节点高亮出来。 */
     onCanvasChanged?: (canvasId: string, changedNodeIds: string[]) => void;
 };
@@ -129,18 +134,21 @@ function readStoredProposals(): Set<string> {
  * 每个画布各持一条运行记录：发送时冻结画布归属，异步结果只写回当时那条记录，
  * 切画布不会把回复落到别的画布上。已结束的回合来自服务端历史，刷新页面不丢。
  */
-export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
+export function useCanvasAssistant({ canvasId, onCanvasChanged, getWorkspaceContext }: Options) {
     const [open, setOpenState] = useState(() => scopedLocalStorage.getItem(OPEN_STORAGE_KEY) !== "0");
     const [width, setWidthState] = useState(() => clampAssistantWidth(Number(scopedLocalStorage.getItem(WIDTH_STORAGE_KEY)) || ASSISTANT_DEFAULT_WIDTH));
     const [status, setStatus] = useState<AgentHostStatus | null>(null);
     const [statusBusy, setStatusBusy] = useState(false);
     const [handledProposals, setHandledProposals] = useState<Set<string>>(readStoredProposals);
     const [, forceRender] = useState(0);
+    const streamRenderTimerRef = useRef<number | null>(null);
 
     const runsRef = useRef<Map<string, CanvasRun>>(new Map());
     const activeCanvasRef = useRef(canvasId);
     activeCanvasRef.current = canvasId;
     const onCanvasChangedRef = useRef(onCanvasChanged);
+    const workspaceContextRef = useRef(getWorkspaceContext);
+    workspaceContextRef.current = getWorkspaceContext;
     onCanvasChangedRef.current = onCanvasChanged;
 
     const runFor = useCallback((id: string): CanvasRun => {
@@ -153,6 +161,26 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
 
     const rerenderIfActive = useCallback((id: string) => {
         if (activeCanvasRef.current === id) forceRender((value) => value + 1);
+    }, []);
+
+    const flushStreamRender = useCallback((id: string) => {
+        if (streamRenderTimerRef.current !== null) {
+            window.clearTimeout(streamRenderTimerRef.current);
+            streamRenderTimerRef.current = null;
+        }
+        rerenderIfActive(id);
+    }, [rerenderIfActive]);
+
+    const scheduleStreamRender = useCallback((id: string) => {
+        if (activeCanvasRef.current !== id || streamRenderTimerRef.current !== null) return;
+        streamRenderTimerRef.current = window.setTimeout(() => {
+            streamRenderTimerRef.current = null;
+            rerenderIfActive(id);
+        }, 50);
+    }, [rerenderIfActive]);
+
+    useEffect(() => () => {
+        if (streamRenderTimerRef.current !== null) window.clearTimeout(streamRenderTimerRef.current);
     }, []);
 
     const setOpen = useCallback((next: boolean) => {
@@ -196,6 +224,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
             if (run.error && findRecoveredAssistantTurn(run.recovery, history)) {
                 run.pendingUserText = null;
                 run.pendingSelectedNodeIds = [];
+                run.pendingRequestedSkill = null;
                 run.error = null;
                 run.recovery = null;
             }
@@ -224,18 +253,20 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         void loadHistory(canvasId);
     }, [canvasId, loadHistory, open, runFor, status?.available]);
 
-    const send = useCallback(async (text: string, selectedNodeIds: string[], references: AgentChatReference[] = []) => {
+    const send = useCallback(async (text: string, selectedNodeIds: string[], references: AgentChatReference[] = [], selectedSkill?: AssistantSkillUse) => {
         const message = text.trim();
         if (!message) return;
         // 发送时冻结归属：此后即使用户切到别的画布，结果也只写回这条记录。
         const targetCanvas = activeCanvasRef.current;
         const selectedSnapshot = [...selectedNodeIds];
         const referenceSnapshot = references.map((reference) => ({ ...reference }));
+        const skillSelection = selectedSkill ? { ...selectedSkill } : undefined;
         const run = runFor(targetCanvas);
         if (run.streaming || run.sessionBusy) return;
         const controller = new AbortController();
         run.pendingUserText = message;
         run.pendingSelectedNodeIds = selectedSnapshot;
+        run.pendingRequestedSkill = skillSelection ?? null;
         run.streamed = "";
         run.streaming = true;
         run.lifecycleNotice = null;
@@ -243,9 +274,10 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         run.error = null;
         run.dispatched = false;
         run.recovery = null;
-        run.lastSent = { text: message, selectedNodeIds: selectedSnapshot, references: referenceSnapshot };
+        run.lastSent = { text: message, selectedNodeIds: selectedSnapshot, references: referenceSnapshot, selectedSkill: skillSelection };
         rerenderIfActive(targetCanvas);
         try {
+            const workspaceContext = await workspaceContextRef.current?.();
             if (workspaceCapabilities().local) {
                 await flushModelConfig();
                 const persistence = getModelConfigPersistenceState();
@@ -262,7 +294,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
                 onDelta: (delta) => {
                     const current = runFor(targetCanvas);
                     current.streamed += delta;
-                    rerenderIfActive(targetCanvas);
+                    scheduleStreamRender(targetCanvas);
                 },
                 onLifecycle: (event) => {
                     const current = runFor(targetCanvas);
@@ -270,6 +302,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
                     rerenderIfActive(targetCanvas);
                 },
                 onTurnEnd: (end) => {
+                    flushStreamRender(targetCanvas);
                     const current = runFor(targetCanvas);
                     const turn: AssistantTurn = {
                         turnId: end.turnId || `${targetCanvas}:${Date.now()}`,
@@ -279,6 +312,10 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
                         toolCalls: end.toolCalls || [],
                         change: end.change ?? null,
                         proposals: end.proposals || [],
+                        workflows: end.workflows || [],
+                        references: referenceSnapshot,
+                        skillsUsed: end.skillsUsed || [],
+                        requestedSkill: end.requestedSkill,
                         error: end.error ? agentAssistantFailureText(end.errorReason ?? undefined, "这一轮没有全部完成，请核对已经落地的改动。") : null,
                         errorReason: end.errorReason,
                         cancelled: Boolean(end.cancelled),
@@ -289,13 +326,15 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
                     current.historyError = null;
                     current.pendingUserText = null;
                     current.pendingSelectedNodeIds = [];
+                    current.pendingRequestedSkill = null;
                     current.streamed = "";
                     current.lifecycleNotice = null;
                     onCanvasChangedRef.current?.(targetCanvas, assistantChangedNodeIds(turn.change));
                     rerenderIfActive(targetCanvas);
                 },
-            }, { signal: controller.signal, selectedNodeIds: selectedSnapshot, references: referenceSnapshot, sessionId: run.sessionId ?? undefined });
+            }, { signal: controller.signal, selectedNodeIds: selectedSnapshot, references: referenceSnapshot, sessionId: run.sessionId ?? undefined, workspaceContext, selectedSkillId: skillSelection?.id });
         } catch (streamError) {
+            flushStreamRender(targetCanvas);
             if (streamError instanceof AgentTurnFailedError) {
                 // onTurnEnd 已保存真实失败及画布变化，不再额外显示「结果未知」或触发重放。
                 runFor(targetCanvas).error = null;
@@ -313,6 +352,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
             if (aborted) {
                 current.pendingUserText = null;
                 current.pendingSelectedNodeIds = [];
+                current.pendingRequestedSkill = null;
             }
             current.streamed = "";
             current.lifecycleNotice = null;
@@ -325,6 +365,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
             }
             rerenderIfActive(targetCanvas);
         } finally {
+            flushStreamRender(targetCanvas);
             const current = runFor(targetCanvas);
             current.streaming = false;
             current.lifecycleNotice = null;
@@ -337,7 +378,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
                 rerenderIfActive(targetCanvas);
             }).catch(() => { /* 会话列表读取失败不覆盖本轮结果；重新读取入口仍可用。 */ });
         }
-    }, [loadHistory, rerenderIfActive, runFor]);
+    }, [flushStreamRender, loadHistory, rerenderIfActive, runFor, scheduleStreamRender]);
 
     // 停止只作用于当前正在查看的画布，不会取消别的画布。
     const stop = useCallback(async () => {
@@ -356,7 +397,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
     const retryLast = useCallback(() => {
         const run = runFor(activeCanvasRef.current);
         if (!run.lastSent || run.dispatched) return;
-        void send(run.lastSent.text, run.lastSent.selectedNodeIds, run.lastSent.references);
+        void send(run.lastSent.text, run.lastSent.selectedNodeIds, run.lastSent.references, run.lastSent.selectedSkill);
     }, [runFor, send]);
 
     const dismissError = useCallback(() => {
@@ -364,6 +405,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         run.error = null;
         run.pendingUserText = null;
         run.pendingSelectedNodeIds = [];
+        run.pendingRequestedSkill = null;
         rerenderIfActive(activeCanvasRef.current);
     }, [rerenderIfActive, runFor]);
 
@@ -461,6 +503,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
     const run = runsRef.current.get(canvasId) ?? createRun();
 
     return {
+        projectId: canvasId,
         open,
         setOpen,
         width,
@@ -477,6 +520,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         reloadHistory: () => loadHistory(canvasId),
         pendingUserText: run.pendingUserText,
         pendingSelectedNodeIds: run.pendingSelectedNodeIds,
+        pendingRequestedSkill: run.pendingRequestedSkill,
         streamed: run.streamed,
         streaming: run.streaming,
         lifecycleNotice: run.lifecycleNotice,

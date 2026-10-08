@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"infinite-canvas/backend/internal/releasebundle"
 )
 
 func validateExtractedLayout(root, platform string) error {
@@ -27,17 +29,20 @@ func validateDarwinLayout(root string) error {
 	bundle := filepath.Join(root, appBundleName)
 	info, err := os.Lstat(bundle)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("更新包缺少 BeefTV.app")
+		return fmt.Errorf("更新包缺少 Seal.app")
 	}
-	exe := filepath.Join(bundle, "Contents", "MacOS", "BeefTV")
+	exe := filepath.Join(bundle, "Contents", "MacOS", "Seal")
 	if err := requireRegularFile(exe, true); err != nil {
 		return err
 	}
 	// 随包 CLI 在主程序旁的 cli 目录里：外部 Agent 靠它接入，缺了就不是完整的安装版。
 	if err := requireRegularFile(filepath.Join(bundle, "Contents", "MacOS", cliDirName, darwinCLIName), true); err != nil {
-		return fmt.Errorf("更新包缺少随包 beeftv CLI: %w", err)
+		return fmt.Errorf("更新包缺少随包 seal CLI: %w", err)
 	}
 	if err := validateAgentHost(filepath.Join(bundle, "Contents", "Resources", "agent-host"), "runtime/bin/node", true); err != nil {
+		return err
+	}
+	if err := validateEditHost(filepath.Join(bundle, "Contents", "Resources", "edit-host"), "darwin"); err != nil {
 		return err
 	}
 	return walkAllowed(root, func(rel string, entry fs.DirEntry) error {
@@ -55,12 +60,15 @@ func validateWindowsLayout(root string) error {
 	if err := validateAgentHost(filepath.Join(root, "agent-host"), "runtime/node.exe", false); err != nil {
 		return err
 	}
+	if err := validateEditHost(filepath.Join(root, "edit-host"), "windows-amd64"); err != nil {
+		return err
+	}
 	exe := filepath.Join(root, windowsExeName)
 	if err := requireRegularFile(exe, false); err != nil {
-		return fmt.Errorf("更新包缺少 BeefTV.exe")
+		return fmt.Errorf("更新包缺少 Seal.exe")
 	}
 	if err := requireRegularFile(filepath.Join(root, cliDirName, windowsCLIName), false); err != nil {
-		return fmt.Errorf("更新包缺少随包 beeftv CLI: %w", err)
+		return fmt.Errorf("更新包缺少随包 seal CLI: %w", err)
 	}
 	plugins := filepath.Join(root, pluginDirName)
 	info, err := os.Lstat(plugins)
@@ -87,7 +95,7 @@ func validateWindowsLayout(root string) error {
 		return fmt.Errorf("更新包缺少官方插件")
 	}
 	return walkAllowed(root, func(rel string, entry fs.DirEntry) error {
-		if rel == "." || rel == windowsExeName {
+		if rel == "." || rel == windowsExeName || rel == "LICENSE" || rel == "NOTICE" || rel == "THIRD_PARTY_NOTICES.md" {
 			return nil
 		}
 		if rel == cliDirName || strings.HasPrefix(rel, cliDirName+string(filepath.Separator)) {
@@ -99,6 +107,9 @@ func validateWindowsLayout(root string) error {
 		if rel == "agent-host" || strings.HasPrefix(rel, "agent-host"+string(filepath.Separator)) {
 			return nil
 		}
+		if rel == "edit-host" || strings.HasPrefix(rel, "edit-host"+string(filepath.Separator)) {
+			return nil
+		}
 		return fmt.Errorf("更新包包含额外文件")
 	})
 }
@@ -107,6 +118,15 @@ func validateAgentHost(root, node string, executable bool) error {
 	for _, name := range []string{"server.mjs", "session-identity.mjs", "canvas-turn.mjs", "request-budget.mjs", "package.json", "node_modules/@earendil-works/pi-coding-agent/package.json", node} {
 		if err := requireRegularFile(filepath.Join(root, filepath.FromSlash(name)), name == node && executable); err != nil {
 			return fmt.Errorf("更新包内置助手资源不完整: %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func validateEditHost(root, platform string) error {
+	for _, name := range releasebundle.EditingFiles(platform) {
+		if err := requireRegularFile(filepath.Join(root, filepath.FromSlash(name)), false); err != nil {
+			return fmt.Errorf("更新包剪辑资源不完整: %s: %w", name, err)
 		}
 	}
 	return nil

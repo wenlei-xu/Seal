@@ -99,6 +99,7 @@ export function assistantUndoFailureText(failure: AssistantUndoFailure): string 
 
 /** 提议可能来自自建渠道，不能把所有费用都归到 BeefAPI。 */
 export function assistantProposalText(proposal: AssistantGenerationProposal): string {
+    if (proposal.assetGeneration) return `${proposal.kind === 'audio' ? '配音' : proposal.kind === 'video' ? '生成视频' : '生成图片'} · ${proposal.model}\n${proposal.prompt || ''}\n确认后开始，按所选渠道计费。结果保存到资产库。`;
     const count = proposal.nodeIds?.length ?? 0;
     const target = proposal.kind === "video" ? "视频" : "图片";
     return `生成 ${count} ${target === "视频" ? "段视频" : "张参考图片"} · ${proposal.model}\n确认后开始，按所选渠道计费。`;

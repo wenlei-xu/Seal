@@ -63,7 +63,7 @@ func TestProviderConfigMigratesLegacyBeefAPIStateWithoutLosingLocalChoices(t *te
 	}
 }
 
-func TestProviderConfigSeedsBeefAPIWhenLocalStateIsMissing(t *testing.T) {
+func TestProviderConfigDoesNotBindAProviderWhenLocalStateIsMissing(t *testing.T) {
 	store, err := NewProviderConfig(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -75,9 +75,9 @@ func TestProviderConfigSeedsBeefAPIWhenLocalStateIsMissing(t *testing.T) {
 	if health != ConfigHealthDefault {
 		t.Fatalf("health = %q", health)
 	}
-	channel := requireEffectiveChannel(t, effective, "beefapi")
-	if channel["apiKey"] != "" || channel["enabled"] != true {
-		t.Fatal("unexpected seeded local state")
+	channels, ok := effective.Config["channels"].([]any)
+	if !ok || len(channels) != 0 {
+		t.Fatalf("fresh workspace must choose its own providers: %#v", effective.Config["channels"])
 	}
 }
 

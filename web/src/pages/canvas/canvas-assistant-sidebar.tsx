@@ -1,4 +1,4 @@
-import { Button, Dropdown, Tooltip } from "antd";
+import { App, Button, Dropdown, Tooltip } from "antd";
 import { History, MessageSquarePlus, X, Clapperboard, ArrowUpRight } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -10,6 +10,11 @@ import { CanvasAssistantComposer } from "./canvas-assistant-composer";
 import { CanvasAssistantReply, CanvasAssistantTurnView, CanvasAssistantUserMessage } from "./canvas-assistant-turn";
 import { ASSISTANT_MAX_WIDTH, ASSISTANT_MIN_WIDTH, type CanvasAssistantController } from "./use-canvas-assistant";
 import "./canvas-assistant-sidebar.css";
+import { CreatorMediaTasks, useCreatorMediaActions } from './creator-media-tasks';
+import { captureUserScope, assertUserScope } from '@/lib/user-scope-guard';
+import { getMediaProposalTask } from '@/services/api/creator';
+import type { AssistantTurn, AssistantWorkflow } from '@/services/api/agent-assistant';
+import type { HubSkill } from '@/services/api/skill-hub';
 
 type Props = {
     assistant: CanvasAssistantController;
@@ -18,15 +23,43 @@ type Props = {
     readOnly: boolean;
     selectedNodeIds: string[];
     references: CanvasResourceReference[];
+    includeAssetLibrary?: boolean;
+    workspaceLabel?: string;
+    referencesLabel?: string;
     onLocateNodes: (nodeIds: string[]) => void;
     onRunProposal: (proposal: AssistantGenerationProposal) => void;
     onOpenModelSettings: () => void;
     proposalFeedback?: Record<string, string>;
+    proposalActionLabel?: string;
+    prefill?: { id: string; text: string };
 };
 
 export function CanvasAssistantSidebar(props: Props) {
     const { assistant, canvasTitle, dockable, readOnly, selectedNodeIds, references, onLocateNodes, onRunProposal, onOpenModelSettings } = props;
+    const mediaActions = useCreatorMediaActions(assistant.projectId, assistant.markProposalHandled);
+    const { message } = App.useApp();
+    const [scope] = useState(() => captureUserScope());
+    const [resuming, setResuming] = useState(false);
+    async function resume(workflow: AssistantWorkflow, turn: AssistantTurn) {
+        if (resuming || assistant.streaming || assistant.sessionBusy) return;
+        setResuming(true);
+        try {
+            const assetIDs = new Set<string>();
+            for (const step of workflow.steps) if (step.taskId && step.taskKind === 'generation') {
+                const task = await getMediaProposalTask(assistant.projectId, step.taskId, scope);
+                for (const output of task.outputs || []) if (output.materializedAssetId) assetIDs.add(output.materializedAssetId);
+            }
+            assertUserScope(scope);
+            await assistant.send(`继续已保存的任务 ${workflow.id}：${workflow.goal}。先用 workflow_read 读取最新步骤，核对原任务、候选和文件摘要，复用现有结果，从未完成处继续；不要重复提交已受理的生成或重复加入轨道。`, [],
+                [...(turn.references || []), ...[...assetIDs].map(id => ({ kind: 'asset' as const, id }))]);
+        } catch (error) { message.error(error instanceof Error ? error.message : '继续任务失败'); }
+        finally { setResuming(false); }
+    }
+    const undoTurn = useCallback((turnId: string) => { void assistant.undoTurn(turnId); }, [assistant.undoTurn]);
     const [draft, setDraft] = useState("");
+    const [selectedSkill, setSelectedSkill] = useState<HubSkill | null>(null);
+    useEffect(() => { setSelectedSkill(null); }, [assistant.projectId]);
+    useEffect(() => { if (props.prefill) setDraft(props.prefill.text); }, [props.prefill]);
     const [selectionAttached, setSelectionAttached] = useState(true);
     const logRef = useRef<HTMLDivElement | null>(null);
     const sidebarRef = useRef<HTMLDivElement | null>(null);
@@ -53,12 +86,13 @@ export function CanvasAssistantSidebar(props: Props) {
         if (!text.trim() || readOnly || assistant.streaming || assistant.sessionBusy) return;
         followLatestRef.current = true;
         setDraft("");
+        setSelectedSkill(null);
         // @ 引用到的素材库素材由界面按用户原文推导后交给后端校验归属：
         // 模型不能自己声明要读哪些素材。
         const assetReferences = referencedAssetIdsInPrompt(text)
             .map((id) => ({ kind: "asset" as const, id }));
-        void assistant.send(text, attachedIds, assetReferences);
-    }, [assistant, attachedIds, draft, readOnly]);
+        void assistant.send(text, attachedIds, assetReferences, selectedSkill ?? undefined);
+    }, [assistant, attachedIds, draft, readOnly, selectedSkill]);
 
     const startResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
         event.preventDefault();
@@ -126,19 +160,24 @@ export function CanvasAssistantSidebar(props: Props) {
                     <CanvasAssistantTurnView
                         key={turn.turnId}
                         turn={turn}
+                        projectId={assistant.projectId}
+                        resumeDisabled={resuming || assistant.streaming || assistant.sessionBusy || readOnly}
+                        onResumeWorkflow={(workflow, original) => void resume(workflow, original)}
                         status={assistant.turnStatus[turn.turnId]}
                         handledProposals={assistant.handledProposals}
-                        proposalFeedback={props.proposalFeedback}
+                        proposalFeedback={{ ...props.proposalFeedback, ...mediaActions.feedback }}
                         onLocate={onLocateNodes}
-                        onUndo={(turnId) => void assistant.undoTurn(turnId)}
-                        onRunProposal={onRunProposal}
+                          onUndo={undoTurn}
+                        onRunProposal={proposal => { if (proposal.assetGeneration) void mediaActions.start(proposal); else onRunProposal(proposal); }}
+                        proposalActionLabel={props.proposalActionLabel}
                         onDismissProposal={assistant.markProposalDismissed}
                     />
                 ))}
+                <CreatorMediaTasks assistant={assistant} onStart={proposal => void mediaActions.start(proposal)} feedback={mediaActions.feedback} />
 
                 {assistant.pendingUserText ? (
                     <div className="canvas-assistant-turn">
-                        <CanvasAssistantUserMessage text={assistant.pendingUserText} selectedCount={assistant.pendingSelectedNodeIds.length} />
+                        <CanvasAssistantUserMessage text={assistant.pendingUserText} selectedCount={assistant.pendingSelectedNodeIds.length} requestedSkill={assistant.pendingRequestedSkill} />
                         {assistantVisibleReply(assistant.streamed || "") ? <CanvasAssistantReply text={assistant.streamed} /> : null}
                         {assistant.streaming && (assistant.lifecycleNotice || !assistantVisibleReply(assistant.streamed || "")) ? (
                             <p className="canvas-assistant-meta">{assistant.lifecycleNotice || "助手正在处理…"}</p>
@@ -167,10 +206,15 @@ export function CanvasAssistantSidebar(props: Props) {
                 disabled={composerDisabled}
                 disabledReason={composerReason}
                 references={references}
+                includeAssetLibrary={props.includeAssetLibrary}
+                workspaceLabel={props.workspaceLabel}
+                referencesLabel={props.referencesLabel}
                 selectedCount={selectedNodeIds.length}
                 selectionAttached={selectionAttached}
                 onDetachSelection={() => setSelectionAttached(false)}
                 modelBusy={assistant.modelBusy}
+                selectedSkill={selectedSkill}
+                onSelectSkill={setSelectedSkill}
             />
         </div>
     );

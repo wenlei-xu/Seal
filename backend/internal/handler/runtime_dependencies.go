@@ -13,6 +13,7 @@ import (
 	"infinite-canvas/backend/internal/conversation"
 	"infinite-canvas/backend/internal/diagnostics"
 	"infinite-canvas/backend/internal/eagle"
+	"infinite-canvas/backend/internal/editruntime"
 	"infinite-canvas/backend/internal/localapp"
 	"infinite-canvas/backend/internal/model"
 	localproject "infinite-canvas/backend/internal/project"
@@ -59,6 +60,7 @@ type RuntimeDependencies struct {
 	// AssistantHost is the per-runtime supervisor for the built-in agent-host child.
 	// Separate runtimes must not share this value.
 	AssistantHost *assistantruntime.Host
+	EditHost      *editruntime.Host
 	// DesktopTrust verifies both the launch token and the separate Wails UI bootstrap credential.
 	// 桌面形态用它代替开发引导开关签发 UI 会话；服务端形态为 nil。
 	DesktopTrust func(*http.Request) bool

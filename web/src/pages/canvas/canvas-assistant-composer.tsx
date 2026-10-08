@@ -1,10 +1,12 @@
 import { Button, Tooltip } from "antd";
 import { ArrowUp, Square, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { CanvasResourceMentionTextarea } from "@/components/canvas/canvas-resource-mention-textarea";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { CanvasAssistantModelPicker } from "./canvas-assistant-model-picker";
+import { useAssistantSkillPicker } from './canvas-assistant-skill-picker';
+import type { HubSkill } from '@/services/api/skill-hub';
 
 const LINE_HEIGHT = 21;
 const MIN_LINES = 3;
@@ -19,10 +21,15 @@ type Props = {
     disabled: boolean;
     disabledReason?: string;
     references: CanvasResourceReference[];
+    includeAssetLibrary?: boolean;
+    workspaceLabel?: string;
+    referencesLabel?: string;
     selectedCount: number;
     selectionAttached: boolean;
     onDetachSelection: () => void;
     modelBusy?: boolean;
+    selectedSkill?: HubSkill | null;
+    onSelectSkill?: (skill: HubSkill | null) => void;
 };
 
 export function CanvasAssistantComposer({
@@ -34,19 +41,29 @@ export function CanvasAssistantComposer({
     disabled,
     disabledReason,
     references,
+    includeAssetLibrary = true,
+    workspaceLabel = "当前画布",
+    referencesLabel,
     selectedCount,
     selectionAttached,
     onDetachSelection,
     modelBusy,
+    selectedSkill = null,
+    onSelectSkill = () => {},
 }: Props) {
+    const composerRef = useRef<HTMLElement>(null);
+    const editorRef = useRef<HTMLTextAreaElement>(null);
+    const skillPicker = useAssistantSkillPicker({value,onChange,selected:selectedSkill,onSelect:onSelectSkill,disabled,streaming,composerRef,editorRef});
     const [contentHeight, setContentHeight] = useState(LINE_HEIGHT);
     const height = Math.min(MAX_LINES * LINE_HEIGHT, Math.max(MIN_LINES * LINE_HEIGHT, contentHeight));
-    const canSend = !disabled && !streaming && Boolean(value.trim());
+    const canSend = !disabled && !streaming && !modelBusy && !skillPicker.blocked && Boolean(value.trim());
 
     return (
-        <footer className="canvas-assistant-composer">
+        <footer ref={composerRef} className="canvas-assistant-composer" onKeyDownCapture={skillPicker.onKeyDownCapture}>
+            {skillPicker.menu}
             <div className="canvas-assistant-chips">
-                <span className="canvas-assistant-chip">当前画布</span>
+                <span className="canvas-assistant-chip">{workspaceLabel}</span>
+                {skillPicker.chip}
                 {selectionAttached && selectedCount > 0 ? (
                     <span className="canvas-assistant-chip">
                         已选 {selectedCount} 个节点
@@ -59,23 +76,27 @@ export function CanvasAssistantComposer({
 
             <div className="canvas-assistant-input" style={{ height: height + 14 }}>
                 <CanvasResourceMentionTextarea
+                    ref={editorRef}
                     value={value}
                     references={references}
                     onChange={onChange}
                     onSubmit={() => { if (canSend) onSend(); }}
-                    includeAssetLibrary
+                    includeAssetLibrary={includeAssetLibrary}
+                    referencesLabel={referencesLabel}
                     containerClassName="h-full min-h-0"
                     className="thin-scrollbar h-full w-full resize-none overflow-y-auto border-none bg-transparent px-3 py-1.5 text-[var(--fs-caption)] leading-[21px] !shadow-none !outline-none !ring-0 focus:!shadow-none focus:!outline-none focus:!ring-0 placeholder:text-[var(--muted-foreground)]"
                     onContentSizeChange={setContentHeight}
                     disabled={disabled}
-                    placeholder="描述你的想法，或用 @ 引用素材"
+                    placeholder="描述想法，@ 引用素材，/ 选择技能"
                     aria-label="给助手的消息"
                 />
             </div>
 
             {disabled && disabledReason ? <span className="canvas-assistant-meta">{disabledReason}</span> : null}
+            {skillPicker.error}
 
             <div className="canvas-assistant-composer-footer">
+                {skillPicker.button}
                 <CanvasAssistantModelPicker busy={disabled || streaming || Boolean(modelBusy)} />
                 {streaming ? (
                     <Button size="small" icon={<Square className="size-3" />} onClick={onStop}>停止</Button>

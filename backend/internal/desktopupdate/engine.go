@@ -201,6 +201,15 @@ func (e *Engine) CheckForUpdate(ctx context.Context) (UpdateState, error) {
 	})
 	payload, err := e.fetchFeed(ctx)
 	if err != nil {
+		if errors.Is(err, errNoPublishedRelease) {
+			e.set(func(state *UpdateState) {
+				state.Status = StatusIdle
+				state.LatestVersion = ""
+				state.ReleaseNotes = err.Error()
+				state.Error = ""
+			})
+			return e.snapshot(), nil
+		}
 		e.logf("check failed route=%s: %v", e.route(e.feedURL), rawCause(err))
 		e.fail(publicError(err))
 		return e.snapshot(), wrapPublic(err)
@@ -438,7 +447,7 @@ func (e *Engine) updatesRoot() (string, error) {
 		if err != nil {
 			cache = os.TempDir()
 		}
-		root = filepath.Join(cache, "BeefTV", "updates")
+		root = filepath.Join(cache, "Seal", "updates")
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return "", err

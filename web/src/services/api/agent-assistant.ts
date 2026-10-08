@@ -1,6 +1,7 @@
 // 内置创作助手：浏览器只与同源 Go 代理通信，宿主/owner/模型凭据都不进入页面。
 // 三个端点的真实路径都在 /api/assistant/* 下；写错路径会让面板永远拿不到回复。
 import { ApiError, apiBaseURL, http } from "./request";
+import type { EditWorkspaceContext } from './edit-projects';
 import { assertUserScope, captureUserScope, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 
 /** 后端给出的不可用原因（穷举，见契约 A1）；未知值一律走兜底文案。 */
@@ -47,7 +48,9 @@ export type AssistantTurnChange = {
 /** 付费生成提议：后端只登记，不生成、不扣费，执行发生在画布既有生成链路。 */
 export type AssistantGenerationProposal = {
     proposalId: string;
-    kind: "image" | "video";
+    kind: "image" | "video" | "audio";
+    assetGeneration?: boolean;
+    prompt?: string;
     nodeIds: string[];
     model: string;
     modelKey: string;
@@ -55,7 +58,12 @@ export type AssistantGenerationProposal = {
     source?: { canvasId: string; canvasRevision: number; modelConfigRevision: number };
 };
 
+export type AssistantSkillUse = { id: string; name: string; displayName?: string; version: string; contentHash: string };
+export type AssistantWorkflow = { id: string; title: string; goal: string; revision: number; turnId: string; steps: Array<{ id: string; label: string; state: 'pending' | 'waiting' | 'done'; note?: string; taskId?: string; taskKind?: 'asr' | 'generation'; candidateId?: string; fileHash?: string; operationId?: string }> };
 export type AgentTurnEnd = {
+    requestedSkill?: AssistantSkillUse | null;
+    workflows?: AssistantWorkflow[];
+    skillsUsed?: AssistantSkillUse[];
     type: "turn_end";
     turnId?: string;
     reply: string;
@@ -70,6 +78,10 @@ export type AgentTurnEnd = {
 };
 
 export type AssistantTurn = {
+    requestedSkill?: AssistantSkillUse | null;
+    workflows?: AssistantWorkflow[];
+    references?: AgentChatReference[];
+    skillsUsed?: AssistantSkillUse[];
     turnId: string;
     userText: string;
     selectedNodeIds: string[];
@@ -111,6 +123,8 @@ let uiSessionGeneration = 0;
  */
 export function agentAssistantFailureText(reason: string | undefined, fallback = "创作助手暂时不可用，请稍后再试") {
     switch (reason) {
+        case "selected_skill_unavailable":
+            return "所选技能已停用、删除或不可用，请在 Skill Hub 核对后重新选择。";
         case "turn_timeout":
             return "这一轮处理超时，已停止继续执行。已落地的改动会保留，可以缩小要求后继续。";
         case "turn_interrupted":
@@ -294,6 +308,8 @@ export type AgentChatReference = {
 };
 
 export type AgentChatRequest = {
+    selectedSkillId?: string;
+    workspaceContext?: EditWorkspaceContext;
     signal?: AbortSignal;
     selectedNodeIds?: string[];
     /** 当前消息里 @ 引用到的资源；后端逐项校验归属，任何一项非法都整轮拒绝。 */
@@ -325,7 +341,7 @@ export async function streamAgentChat(
     handlers: StreamHandlers,
     request: AgentChatRequest = {},
 ): Promise<void> {
-    const { signal, selectedNodeIds = [], references = [], sessionId } = request;
+    const { signal, selectedNodeIds = [], references = [], sessionId, workspaceContext, selectedSkillId } = request;
     const scope = captureUserScope();
     let token: string;
     try {
@@ -338,6 +354,8 @@ export async function streamAgentChat(
     const body: Record<string, unknown> = { canvasId, message, selectedNodeIds };
     if (references.length) body.references = references;
     if (sessionId) body.sessionId = sessionId;
+    if (workspaceContext) body.workspaceContext = workspaceContext;
+    if (selectedSkillId) body.selectedSkillId = selectedSkillId;
     const response = await fetch(`${apiBaseURL}/assistant/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Beeftv-Ui-Session": token },

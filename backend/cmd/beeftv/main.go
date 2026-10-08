@@ -1,4 +1,4 @@
-// beeftv 是 BeefTV 的常规命令行入口：与内置 pi、MCP 共用同一套业务操作层，
+// seal 是 Seal 的常规命令行入口：与内置 pi、MCP 共用同一套业务操作层，
 // 连接同一个正在运行的本地工作区，不各自打开数据库或另起 worker。
 package main
 
@@ -124,7 +124,7 @@ func newClient() (*client, error) {
 
 func (c *client) do(ctx context.Context, method, path string, body any) (json.RawMessage, error) {
 	if c.baseURL == "" {
-		return nil, &cliError{code: exitTransportFailure, reason: "runtime_not_found", msg: "未发现运行中的 BeefTV 工作区。请先打开 BeefTV；若使用自定义目录，请检查 BEEFTV_DATA_DIR；独立服务请显式设置 BEEFTV_BASE_URL"}
+		return nil, &cliError{code: exitTransportFailure, reason: "runtime_not_found", msg: "未发现运行中的 Seal 工作区。请先打开 Seal；若使用自定义目录，请检查 BEEFTV_DATA_DIR；独立服务请显式设置 BEEFTV_BASE_URL"}
 	}
 	var payload io.Reader
 	if body != nil {
@@ -270,7 +270,7 @@ func main() {
 				fmt.Println(string(encoded))
 			}
 		}
-		fmt.Fprintf(os.Stderr, "beeftv: %v\n", err)
+		fmt.Fprintf(os.Stderr, "seal: %v\n", err)
 		os.Exit(code)
 	}
 	os.Exit(exitOK)
@@ -348,25 +348,25 @@ func run(args []string) error {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `beeftv — BeefTV 业务操作命令行（连接正在运行的本地工作区）
+	fmt.Fprint(os.Stderr, `seal — Seal 业务操作命令行（连接正在运行的本地工作区）
 
-  beeftv ops [--read-only] [--json]
-  beeftv canvas get --canvas <id> [--json]
-  beeftv canvas search [--query <q>] [--page N] [--page-size N] [--json]
-  beeftv canvas node update --canvas <id> --node <id> --expected-revision N [--title T] [--prompt P] [--content C] --op-id <id>
-  beeftv canvas nodes create --canvas <id> --expected-revision N --node <title:type[:prompt]>... --op-id <id>
-  beeftv canvas edge create --canvas <id> --from <nodeId> --to <nodeId> --expected-revision N --op-id <id>
-  beeftv asset list [--query <q>] [--kind <kind>] [--favorite] [--recent] [--project <name>] [--generated] [--json]
-  beeftv asset get --asset <id> [--json]
-  beeftv task get --task <id> [--json]
-  beeftv client register --label <label> --mode read-only|read-write [--kind codex|claude|cursor|other]
-  beeftv mcp serve [--read-only]
+  seal ops [--read-only] [--json]
+  seal canvas get --canvas <id> [--json]
+  seal canvas search [--query <q>] [--page N] [--page-size N] [--json]
+  seal canvas node update --canvas <id> --node <id> --expected-revision N [--title T] [--prompt P] [--content C] --op-id <id>
+  seal canvas nodes create --canvas <id> --expected-revision N --node <title:type[:prompt]>... --op-id <id>
+  seal canvas edge create --canvas <id> --from <nodeId> --to <nodeId> --expected-revision N --op-id <id>
+  seal asset list [--query <q>] [--kind <kind>] [--favorite] [--recent] [--project <name>] [--generated] [--json]
+  seal asset get --asset <id> [--json]
+  seal task get --task <id> [--json]
+  seal client register --label <label> --mode read-only|read-write [--kind codex|claude|cursor|other]
+  seal mcp serve [--read-only]
 
-连接哪个工作区：不设 BEEFTV_BASE_URL 时自动连正在运行的 BeefTV 桌面应用，端口是动态的。
+连接哪个工作区：不设 BEEFTV_BASE_URL 时自动连正在运行的 Seal 桌面应用，端口是动态的。
 BEEFTV_DATA_DIR 可以指向非默认数据目录。Windows 从用户目录下 .beeftv/runtime 读取对应
-工作区的运行信息，其他平台读取数据目录里的 runtime.json。升级后请重新打开 BeefTV。
+工作区的运行信息，其他平台读取数据目录里的 runtime.json。升级后请重新打开 Seal。
 
-凭据：在 BeefTV 的设置里新建一个客户端，把它给出的 BEEFTV_CLIENT_ID 与 BEEFTV_CLIENT_TOKEN
+凭据：在 Seal 的设置里新建一个客户端，把它给出的 BEEFTV_CLIENT_ID 与 BEEFTV_CLIENT_TOKEN
 填进环境变量即可，不需要桌面令牌。读写权限在新建时就定下来，客户端自己改不了。
 
 写操作必须带幂等键（CLI 的 --op-id，MCP 工具参数里的 operationId）：重试同一操作要复用同一个值。
@@ -659,12 +659,12 @@ func runMCP(c *client, args []string) error {
 	timedOut := errors.Is(startupCtx.Err(), context.DeadlineExceeded)
 	cancel()
 	if timedOut {
-		return &cliError{code: exitTransportFailure, reason: "mcp_startup_timeout", msg: "连接 BeefTV 工作区超过 5 秒，请确认 BeefTV 已启动且工作区可以访问"}
+		return &cliError{code: exitTransportFailure, reason: "mcp_startup_timeout", msg: "连接 Seal 工作区超过 5 秒，请确认 Seal 已启动且工作区可以访问"}
 	}
 	if err != nil {
 		return err
 	}
-	server := mcp.NewServer(&mcp.Implementation{Name: "beeftv", Version: "1.0.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "seal", Version: "1.0.0"}, nil)
 	for _, op := range ops {
 		descriptor := op
 		server.AddTool(&mcp.Tool{Name: descriptor.ID, Description: descriptor.Summary, InputSchema: descriptor.Params,
@@ -704,7 +704,7 @@ func runMCP(c *client, args []string) error {
 			})
 	}
 	_, baseSource := resolveBaseURL()
-	fmt.Fprintf(os.Stderr, "beeftv mcp serve: %d 个工具，base=%s（%s），client=%s\n", len(ops), c.baseURL, baseSource, orNone(c.clientID))
+	fmt.Fprintf(os.Stderr, "seal mcp serve: %d 个工具，base=%s（%s），client=%s\n", len(ops), c.baseURL, baseSource, orNone(c.clientID))
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
 

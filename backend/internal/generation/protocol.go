@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -465,6 +466,9 @@ func ExecuteProtocolBinaryRequestWithConsumer(ctx context.Context, config Config
 	if err := ApplyProtocolAuth(req, config, spec.Auth); err != nil {
 		return nil, "", err
 	}
+	if spec.AudioStream != nil {
+		return executeAudioStream(req, config, *spec.AudioStream)
+	}
 	if consume != nil {
 		req.Header.Set("Accept", "text/event-stream")
 		return DoBinaryWithConsumer(req, consume)
@@ -619,6 +623,23 @@ func ApplyProtocolAuth(req *http.Request, config Config, auth protocol.ManifestA
 	}
 	credential := ProtocolCredentialField(config, auth.Field)
 	switch typeName {
+	case "xfyun-ws":
+		secret := ProtocolCredentialField(config, auth.SecretField)
+		if credential == "" || secret == "" {
+			return errors.New("讯飞语音合成需要 API Key 与 API Secret")
+		}
+		date := time.Now().UTC().Format(http.TimeFormat)
+		original := "host: " + req.URL.Host + "\ndate: " + date + "\nGET " + req.URL.Path + " HTTP/1.1"
+		hash := hmac.New(sha256.New, []byte(secret))
+		hash.Write([]byte(original))
+		signature := base64.StdEncoding.EncodeToString(hash.Sum(nil))
+		authorization := fmt.Sprintf("api_key=%q, algorithm=\"hmac-sha256\", headers=\"host date request-line\", signature=%q", credential, signature)
+		query := req.URL.Query()
+		query.Set("host", req.URL.Host)
+		query.Set("date", date)
+		query.Set("authorization", base64.StdEncoding.EncodeToString([]byte(authorization)))
+		req.URL.RawQuery = query.Encode()
+		return nil
 	case "none":
 		return nil
 	case "bearer":

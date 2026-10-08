@@ -112,6 +112,7 @@ type PollContext struct {
 }
 
 type RequestSpec struct {
+	AudioStream *AudioStreamSpec    `json:"audioStream,omitempty"`
 	Method      string              `json:"method"`
 	Path        string              `json:"path"`
 	OriginPath  bool                `json:"originPath,omitempty"`
@@ -121,6 +122,15 @@ type RequestSpec struct {
 	Body        any                 `json:"body,omitempty"`
 	Files       []RequestFilePart   `json:"files,omitempty"`
 	Auth        ManifestAuth        `json:"auth,omitempty"`
+}
+
+// AudioStreamSpec describes ordered base64 audio frames without plugin code.
+type AudioStreamSpec struct {
+	Transport string `json:"transport"`
+	AudioPath string `json:"audioPath"`
+	CodePath  string `json:"codePath"`
+	DonePath  string `json:"donePath"`
+	DoneValue int    `json:"doneValue"`
 }
 
 type RequestFilePart struct {

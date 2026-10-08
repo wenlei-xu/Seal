@@ -74,7 +74,7 @@ if [[ -n "${BEEFTV_WAILS_PLATFORM:-}" ]]; then
   esac
 fi
 
-echo "Building BeefTV $VERSION_VALUE ($COMMIT_VALUE)"
+echo "Building Seal $VERSION_VALUE ($COMMIT_VALUE)"
 
 mkdir -p "$DESKTOP_DIR/build"
 cp "$ROOT_DIR/assets/app-icon.png" "$DESKTOP_DIR/build/appicon.png"
@@ -97,10 +97,11 @@ cp "$ROOT_DIR/assets/app-icon.png" "$DESKTOP_DIR/build/appicon.png"
 
 # Official protocol packages are runtime dependencies. Finder launches use the
 # bundle Resources directory and must never depend on the caller's cwd.
-APP_BUNDLE="$DESKTOP_DIR/build/bin/BeefTV.app"
+APP_BUNDLE="$DESKTOP_DIR/build/bin/Seal.app"
 PLUGIN_RESOURCE_DIR="$APP_BUNDLE/Contents/Resources/plugin-packages"
 mkdir -p "$PLUGIN_RESOURCE_DIR"
 cp "$ROOT_DIR/plugin-packages/"*.beeftv-plugin "$PLUGIN_RESOURCE_DIR/"
+cp "$ROOT_DIR/LICENSE" "$ROOT_DIR/NOTICE" "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$APP_BUNDLE/Contents/Resources/"
 
 bun "$ROOT_DIR/scripts/package-agent-host.mjs" "$AGENT_TARGET" \
   "$APP_BUNDLE/Contents/Resources/agent-host"
@@ -110,9 +111,9 @@ bun "$ROOT_DIR/scripts/package-agent-host.mjs" "$AGENT_TARGET" \
 # app must carry it -- PATH is not a prerequisite.
 #
 # It goes in Contents/MacOS/cli, not directly next to the app binary: macOS
-# volumes are case-insensitive by default, so a file named beeftv beside BeefTV
+# volumes are case-insensitive by default, so a file named beeftv beside Seal
 # is the same file and would overwrite the app binary.
-CLI_BINARY="$APP_BUNDLE/Contents/MacOS/cli/beeftv"
+CLI_BINARY="$APP_BUNDLE/Contents/MacOS/cli/seal"
 mkdir -p "$(dirname "$CLI_BINARY")"
 (
   cd "$ROOT_DIR/backend"

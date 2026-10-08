@@ -1,4 +1,4 @@
-// BeefTV 内置 pi 会话宿主（正式）：HTTP 适配器。
+// Seal 内置 pi 会话宿主（正式）：HTTP 适配器。
 // SDK 会话所有权在 session-owner.mjs；画布操作桥在 operation-bridge.mjs。
 import http from 'node:http';
 import fs from 'node:fs';
@@ -13,6 +13,12 @@ import { providerRegistration, providerUnavailableReason,
 import { budgetError, createTurnBudget, spendModelRequest } from './request-budget.mjs';
 import { createDurableRequestBudget } from './durable-request-budget.mjs';
 import { createOperationBridge } from './operation-bridge.mjs';
+import { createEditBridge } from './edit-bridge.mjs';
+import { createHypitBridge } from './hypit-bridge.mjs';
+import { createHyperframesBridge } from './hyperframes-bridge.mjs';
+import { createCreatorBridge } from './creator-bridge.mjs';
+import { createFullControlLoader } from './full-control-loader.mjs';
+import { createSkillReadBridge, loadSelectedSkill, selectedSkillPrompt, rememberSkillRead } from './skill-read-bridge.mjs';
 import { TURN_ENTRY_TYPE, createSessionStore } from './session-owner.mjs';
 
 const OPS_URL = (process.env.BEEFTV_OPS_URL || 'http://127.0.0.1:18090/api').replace(/\/+$/, '');
@@ -125,6 +131,7 @@ const ops = createOperationBridge({
   turnBudgetContext,
 });
 
+const skillRead = createSkillReadBridge({ turnBudgetContext });
 const store = createSessionStore({
   sessionRoot: SESSION_ROOT,
   workspaceRoot: WORKSPACE_ROOT,
@@ -132,7 +139,14 @@ const store = createSessionStore({
   runId: RUN_ID,
   getModelRuntime: () => modelRuntime,
   getModel: () => MODEL,
+  resourceLoaderFactory: () => createFullControlLoader({ managed: true, dataDir: DATA_DIR }),
 });
+
+const edits = createEditBridge({ opsUrl: OPS_URL, hostToken: HOST_TOKEN, desktopToken: DESKTOP_TOKEN, turnBudgetContext, readOnly: READ_ONLY_MODE });
+const hypit = createHypitBridge({ opsUrl: OPS_URL, hostToken: HOST_TOKEN, desktopToken: DESKTOP_TOKEN, turnBudgetContext, readOnly: READ_ONLY_MODE });
+const hyperframes = createHyperframesBridge({ opsUrl: OPS_URL, hostToken: HOST_TOKEN, desktopToken: DESKTOP_TOKEN, turnBudgetContext, readOnly: READ_ONLY_MODE });
+const creator = createCreatorBridge({ opsUrl: OPS_URL, hostToken: HOST_TOKEN, desktopToken: DESKTOP_TOKEN, turnBudgetContext, readOnly: READ_ONLY_MODE });
+const buildTools = (...args) => [...ops.buildTools(...args), ...edits.buildTools(...args), ...hypit.buildTools(...args), ...hyperframes.buildTools(...args), ...creator.buildTools(...args), ...skillRead.buildTools(...args)];
 
 function sendLine(res, payload) { res.write(JSON.stringify(payload) + '\n'); }
 
@@ -241,7 +255,7 @@ const server = http.createServer(async (req, res) => {
       const canvasId = String(body.canvasId || '').trim();
       if (!canvasId) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
       const entry = await store.replaceSession(canvasId, () => store.createLiveSession({
-        canvasId, sessionId: '', buildTools: ops.buildTools,
+        canvasId, sessionId: '', buildTools,
       }));
       respond(res, 200, { sessionId: entry.sessionId });
       return;
@@ -252,7 +266,7 @@ const server = http.createServer(async (req, res) => {
       const sessionId = String(body.sessionId || '').trim();
       if (!canvasId || !sessionId) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
       const entry = await store.replaceSession(canvasId, () => store.createLiveSession({
-        canvasId, sessionId, buildTools: ops.buildTools,
+        canvasId, sessionId, buildTools,
       }));
       respond(res, 200, { sessionId: entry.sessionId });
       return;
@@ -305,12 +319,23 @@ const server = http.createServer(async (req, res) => {
       }
       if (!canvasId || !message) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
       if (providerReason) { respond(res, 503, { code: 503, reason: providerReason }); return; }
-      const entry = await store.acquireChatSession(canvasId, ops.buildTools, requestedSessionId);
+      if (!body.skillSnapshot) { respond(res, 400, { code: 400, reason: 'skill_snapshot_required' }); return; }
+      const loadedSkill = await loadSelectedSkill(body.skillSnapshot, body.selectedSkillId);
+      const entry = await store.acquireChatSession(canvasId, buildTools, requestedSessionId, body.skillSnapshot);
       const budget = createTurnBudget({ maxRequests: MAX_REQUESTS_PER_TURN, maxToolSteps: MAX_TOOL_STEPS_PER_TURN });
       try {
         resetTurnAccumulator(entry.turn, revisionBefore, turnId);
+        entry.turn.skillSnapshot = Object.freeze(structuredClone(body.skillSnapshot));
+        entry.turn.skillsUsed = [];
+        const requestedSkill = loadedSkill ? { id:loadedSkill.skill.id, name:loadedSkill.skill.name, displayName:loadedSkill.skill.displayName, version:loadedSkill.skill.version, contentHash:loadedSkill.skill.contentHash } : null;
+        if (loadedSkill) rememberSkillRead(entry.turn, loadedSkill.skill);
+        message = `${selectedSkillPrompt(loadedSkill)}\n\n本轮用户需求：\n${message}`;
+        entry.turn.workspaceContext = body.workspaceContext?.mode === 'edit' ? Object.freeze(structuredClone(body.workspaceContext)) : null;
+        entry.turn.editRevision = entry.turn.workspaceContext?.revision;
+        entry.turn.hypitContext = null;
+        if (entry.turn.workspaceContext) message = `当前任务在剪辑工作区，绑定上下文：${JSON.stringify(entry.turn.workspaceContext)}\n用户消息中的 @[media:相对路径] 是当前剪辑工程的素材引用。使用当前工程的剪辑工具读取和操作该素材，先读取工程定位使用它的片段；不要把它当成素材库 asset ID，也不要跨工程查找。\n${message}`;
         entry.manager.appendCustomEntry(`${TURN_ENTRY_TYPE}.started`, {
-          turnId, userText, selectedNodeIds: selected, references, createdAt: new Date().toISOString(),
+          turnId, userText, selectedNodeIds: selected, references, requestedSkill, workspaceContext: entry.turn.workspaceContext, createdAt: new Date().toISOString(),
         });
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
         const before = entry.log.length;
@@ -333,11 +358,12 @@ const server = http.createServer(async (req, res) => {
         const toolCalls = entry.log.slice(before);
         const change = turnChange(entry.turn);
         const proposals = [...entry.turn.proposals];
-        const record = { turnId, userText, selectedNodeIds: selected, references, reply, toolCalls, change, proposals,
+        const workflows = entry.turn.workflowJournal.read().filter(item => item.turnId === turnId);
+        const record = { turnId, userText, selectedNodeIds: selected, references, requestedSkill, reply, toolCalls, change, proposals, workflows, skillsUsed: entry.turn.skillsUsed,
           error, errorReason, cancelled: entry.generation.aborted, createdAt: new Date().toISOString() };
         try { entry.manager.appendCustomEntry(TURN_ENTRY_TYPE, record); }
         catch (persistError) { console.error(`agent-host: 轮次记录写入失败 ${persistError?.message || persistError}`); }
-        sendLine(res, { type: 'turn_end', turnId, reply, toolCalls, change, proposals, error, errorReason,
+        sendLine(res, { type: 'turn_end', turnId, reply, toolCalls, change, proposals, workflows, requestedSkill, skillsUsed: entry.turn.skillsUsed, error, errorReason,
           cancelled: entry.generation.aborted, persistence: entry.persistence,
           sessionId: entry.sessionId, metrics: { firstTokenMs, totalMs: Date.now() - started,
             requests: budget.requests, toolSteps: budget.toolSteps } });
@@ -352,7 +378,7 @@ const server = http.createServer(async (req, res) => {
     if (error?.tooLarge) { respond(res, 413, { code: 413, reason: 'body_too_large' }); return; }
     if (!res.headersSent && respondStoreError(res, error)) return;
     console.error(`agent-host: 请求失败 ${error?.message || error}`);
-    if (!res.headersSent) { respond(res, 500, { code: 500, reason: 'internal_error', message: String(error?.message || error) }); }
+    if (!res.headersSent) { const selectedUnavailable=error?.reason==='selected_skill_unavailable'; respond(res, selectedUnavailable?400:500, { code:selectedUnavailable?400:500, reason:selectedUnavailable?'selected_skill_unavailable':'internal_error', message: String(error?.message || error) }); }
     else { sendLine(res, { type: 'turn_end', reply: '', toolCalls: [], change: null, proposals: [], error: String(error?.message || error), cancelled: false }); res.end(); }
   }
 });

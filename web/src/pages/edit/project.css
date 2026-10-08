@@ -1,0 +1,11 @@
+.editing-project { position:relative;overflow:hidden; }
+.editing-project-header { display:flex;align-items:center;gap:10px;height:38px;flex-shrink:0;padding:0 12px;border-bottom:1px solid var(--border);background:var(--card);font-size:12px; }
+.editing-project-header>.ant-btn { font-size:11px; }
+.editing-project-header>a { white-space:nowrap;color:var(--muted-foreground); }
+.editing-project-workspace { display:flex;flex:1;gap:8px;min-height:0;padding:8px; }
+.editing-project-workspace>main { overflow:hidden;border:1px solid var(--border);border-radius:var(--radius-md); }
+.editing-assistant-column { display:flex;flex:0 0 auto;flex-direction:column;min-height:0;max-width:45%;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-md); }
+.editing-assistant-column .canvas-assistant-sidebar { flex:1;min-height:0;border-left:0;max-width:100%;border-radius:inherit; }
+.editing-assistant-column .canvas-assistant-panel { border-radius:inherit; }
+.editing-materials-error { padding:6px 12px;font-size:var(--fs-caption);color:var(--destructive);border-bottom:1px solid var(--border); }
+@media(max-width:1000px) { .editing-project-header { gap:6px; }.editing-project-header>.text-xs { display:none; } }

@@ -14,6 +14,7 @@ import (
 )
 
 type ManifestOperation struct {
+	AudioStream         *AudioStreamSpec   `json:"audioStream,omitempty"`
 	Method              string             `json:"method"`
 	Path                string             `json:"path"`
 	PathTemplate        any                `json:"pathTemplate,omitempty"`
@@ -890,7 +891,7 @@ func buildManifestOperation(operation ManifestOperation, auth ManifestAuth, requ
 		return RequestSpec{}, fmt.Errorf("evaluate request content type: %w", err)
 	}
 	contentType := defaultValue(manifestString(evaluatedContentType), "application/json")
-	return RequestSpec{Method: strings.ToUpper(operation.Method), Path: path, OriginPath: operation.OriginPath, ContentType: contentType, Headers: headers, Query: query, Body: body, Files: files, Auth: auth}, nil
+	return RequestSpec{Method: strings.ToUpper(operation.Method), Path: path, OriginPath: operation.OriginPath, ContentType: contentType, Headers: headers, Query: query, Body: body, Files: files, Auth: auth, AudioStream: operation.AudioStream}, nil
 }
 
 func evaluateManifestStringMap(values map[string]any, env map[string]any) (map[string]string, error) {
@@ -1100,6 +1101,10 @@ func manifestRequestValues(request GenerationRequest) map[string]any {
 	output.GenerateAudio = output.GenerateAudio || request.GenerateAudio
 	output.Watermark = output.Watermark || request.Watermark
 	outputValue, _ := requestAsManifestValue(output)
+	providerOptionValues := make(map[string]any, len(request.ProviderOptions))
+	for namespace, values := range request.ProviderOptions {
+		providerOptionValues[namespace] = values
+	}
 
 	return map[string]any{
 		"capability":      request.Capability,
@@ -1120,7 +1125,7 @@ func manifestRequestValues(request GenerationRequest) map[string]any {
 		"watermark":       request.Watermark,
 		"operation":       request.Operation,
 		"output":          outputValue,
-		"providerOptions": request.ProviderOptions,
+		"providerOptions": providerOptionValues,
 		"extra":           request.Extra,
 	}
 }

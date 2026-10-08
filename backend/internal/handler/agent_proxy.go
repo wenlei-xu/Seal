@@ -234,7 +234,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 			fail(c, http.StatusBadRequest, app.BadAuthRequest("canvasId 必填"))
 			return nil, false
 		}
-		raw, err := svc.UserCanvasProject(c.GetString("agentUserId"), canvasID)
+		raw, err := svc.UserAssistantProject(c.GetString("agentUserId"), canvasID)
 		if err != nil {
 			fail(c, http.StatusNotFound, app.BadAuthRequest("画布不存在或不属于当前工作区"))
 			return nil, false
@@ -352,11 +352,13 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 			return
 		}
 		var payload struct {
-			CanvasID        string               `json:"canvasId"`
-			Message         string               `json:"message"`
-			SelectedNodeIDs []string             `json:"selectedNodeIds"`
-			SessionID       string               `json:"sessionId"`
-			References      []assistantReference `json:"references"`
+			CanvasID         string                `json:"canvasId"`
+			WorkspaceContext *editWorkspaceContext `json:"workspaceContext"`
+			Message          string                `json:"message"`
+			SelectedNodeIDs  []string              `json:"selectedNodeIds"`
+			SessionID        string                `json:"sessionId"`
+			References       []assistantReference  `json:"references"`
+			SelectedSkillID  string                `json:"selectedSkillId"`
 		}
 		if err := json.Unmarshal(body, &payload); err != nil || strings.TrimSpace(payload.CanvasID) == "" || strings.TrimSpace(payload.Message) == "" {
 			fail(c, http.StatusBadRequest, app.BadAuthRequest("canvasId 与 message 必填"))
@@ -365,6 +367,16 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 		canvasRaw, allowed := requireOwnedCanvas(c, payload.CanvasID)
 		if !allowed {
 			return
+		}
+		if payload.WorkspaceContext != nil {
+			context, valid := validateEditWorkspaceContext(c, payload.CanvasID, payload.WorkspaceContext)
+			if !valid {
+				return
+			}
+			var object map[string]json.RawMessage
+			_ = json.Unmarshal(body, &object)
+			object["workspaceContext"], _ = json.Marshal(context)
+			body, _ = json.Marshal(object)
 		}
 		// 额外素材/画布引用必须由界面明确请求：这里校验归属，校验不过就整轮拒绝，
 		// 不把「模型说可以读」当成授权。
@@ -395,6 +407,25 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 				}
 			}
 		}
+		// Resolve selection against the current user's enabled, frozen packages before admission.
+		skillSnapshot, err := svc.SkillHubSnapshot(c.GetString("agentUserId"), skillHubBuiltinRoots(host))
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		if payload.SelectedSkillID != "" {
+			found := false
+			for _, skill := range skillSnapshot.Skills {
+				if skill.ID == payload.SelectedSkillID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				c.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "reason": "selected_skill_unavailable", "msg": "所选技能已停用、删除或不可用，请重新选择"})
+				return
+			}
+		}
 		// 轮前快照在转发之前就落盘：宿主没有画布持久化通道，这个前提只能由后端建立，
 		// 否则撤销会拿不到「这轮开始之前」的文档。范围也只在这里验证并持久化：
 		// 之后的操作入口按这条记录读授权，宿主与模型都无法自报。
@@ -413,6 +444,22 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 		forwarded, err := withTurnEnvelope(body, turnID, revisionBefore, references)
 		if err != nil {
 			fail(c, http.StatusBadRequest, app.BadAuthRequest("请求体不是合法 JSON"))
+			return
+		}
+		// Only the authenticated backend chooses the user's enabled Skill snapshot.
+		var trustedBody map[string]json.RawMessage
+		if err = json.Unmarshal(forwarded, &trustedBody); err != nil {
+			failService(c, err)
+			return
+		}
+		trustedBody["skillSnapshot"], err = json.Marshal(skillSnapshot)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		forwarded, err = json.Marshal(trustedBody)
+		if err != nil {
+			failService(c, err)
 			return
 		}
 		// 上游请求与浏览器连接解耦：用户中途关页面/点停止不能让已经落地的写入丢掉回合归属。

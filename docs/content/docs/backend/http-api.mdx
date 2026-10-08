@@ -41,6 +41,7 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 | `/tasks/*` | 生成任务创建、查询、取消、恢复与事件流 |
 | `/ai/*` | 外部模型目录和自定义协议转发 |
 | `/plugins/*`, `/skills/*` | 本地扩展包与技能 |
+| `/skill-hub/*` | 本地 Skill 导入、查看、启停、更新和卸载 |
 | `/creation-conversations/*` | `/create` 页面对话的提交事实：按对话 CAS 读写、导入与墓碑删除 |
 | `/ops`, `/ops/:op` | 统一操作层：CLI、MCP 与内置 pi 会话共用同一组操作与校验 |
 | `/ops/clients*`, `/assistant/*` | 外部客户端登记、内置创作助手（同源代理）与宿主生命周期 |
@@ -55,6 +56,46 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 `POST /depth-captures` 接收待处理视频素材编号，创建本机深度动作捕捉任务。只接受当前用户已上传完成的视频。
 
 这些任务在本机完成，提交时不用挑选模型。请求可以带 `clientOperationId`：同一确认重复提交会回到原来的任务；同一确认换成不同内容会被拒绝，不会再新建一条。
+
+## 本地 Skill Hub
+
+所有请求使用当前工作区身份。内置 `beeftv-editing`、`hypit`、`hyperframes`、`video-use`、`skill-creator` 允许查看和启停；用户包不能覆盖内置标识。
+
+| 请求 | 合同 |
+| --- | --- |
+| `GET /skill-hub` | `{ skills }`，含来源、启停、当前版本、文件数与诊断 |
+| `POST /skill-hub/inspect` | multipart `file`、可选 `name` / `description`；返回入口预览、规范化哈希、缺失元数据与同名冲突 |
+| `POST /skill-hub/install` | 同一文件和元数据、预览 `contentHash`、`enabled`；更新须明确 `targetId`，保留启停状态 |
+| `PATCH /skill-hub/:id/enabled` | `{ enabled: boolean }`，最多同时启用 64 个 Skill |
+| `DELETE /skill-hub/:id` | 卸载用户安装包；不删除作品 |
+| `GET /skill-hub/:id/files` | `{ files }` 文件索引 |
+| `GET /skill-hub/:id/file?path=…` | `{ file, content, binary }`，路径必须属于该包 |
+
+文件选择器接受本地 Markdown/ZIP；单包解压总计 20MB，单文件 8MB，最多 512 文件，入口文本 512KB。导入不执行脚本、不安装依赖。Agent 请求由 Go 覆盖注入当前用户的可信 `skillSnapshot`；普通页面不能指定读取根目录。SDK 会话仅在轮次间刷新，同一轮固定版本，受限 `read` 和 `hypit_read(area=skill)` 均遵守该快照。回合 `skillsUsed` 记录通过这些工具读取、或由显式选择在运行前完整加载的技能，页面展示“本轮已读取技能”。
+
+`POST /assistant/chat` 可带 `selectedSkillId`，每条消息最多指定一个技能。Go 在创建业务轮次前核对当前用户的已启用技能快照；不存在、停用或不可用时返回 `selected_skill_unavailable`，不转发模型请求。运行端从该快照的目录读取完整 `SKILL.md`，按当前版本处理本轮，并按需通过受限 `read` 获取引用文件。客户端不能提交目录或说明内容替代可信快照。`turn_end` 与官方会话历史中的 `requestedSkill` 保存指定技能的 ID、名称、显示名称、版本及内容哈希；自动选择仍由 Agent 按需求决定，历史轮次的指定不自动延续。
+
+### 助手制作扩充
+
+以下 POST 均在 `/assistant/projects/:projectId` 下，要求受信任的桌面界面或有效的当前工程宿主轮次；外部客户端不能借用宿主或 UI 身份。
+
+| 路径 | 合同 |
+| --- | --- |
+| `/skills/list`、`/skills/file` | 读取当前用户 Hub 和包内文件；读取不启用脚本 |
+| `/skills/author` | `files` 文本映射、`save`、`enabled`；更新另带 `targetId` 与 `expectedTargetHash`。格式验证不等于行为验证，保存后下一轮加载 |
+| `/skills/search` | `query`；搜索公开 GitHub 仓库，命中项尚未验证 |
+| `/skills/download` | `url`、可选 `ref/subdir`、`enabled`；更新须当前摘要。保存实际 commit，无依赖安装和自动升级 |
+| `/media/asr-status` | 本地模型及已有转写服务就绪状态，不返回路径、地址或密钥 |
+| `/media/transcribe` | 引用的 `assetId`、可选 `language` 和 `route=local/service`。生成或复用 `timeline_transcription` 任务；资源、语言、工程、运行配置共同确定身份 |
+| `/media/transcription` | `taskId`；读取当前工程 ASR 状态及持久结果，`timingLevel=token` 为近似 token 对齐 |
+| `/media/propose`、`/media/proposals` | 提出或读取图片、视频、配音方案；不提交上游生成 |
+| `/media/accept/:proposalId` | **仅受信任界面**确认生成；接收现有 `CreateTaskInput`，核对提示词、模式与模型版本，使用固定提交编号；宿主不能代确认 |
+| `/media/task` | 读取当前工程已接受方案的任务及素材交付状态；重开后查询原任务 |
+
+`GET /assistant/asr` 返回本地识别就绪状态及脱敏的 `settings`。`PUT /assistant/asr` 由受信任桌面界面保存配置，包含 `revision`、`defaultRoute`（auto/local/service）、`language`、`serviceEnabled`、`serviceType`（whisper/openai）、`baseUrl`、`model`、`apiKey`、`hasApiKey`。保存时检查版本；密钥留空且 `hasApiKey=true` 保留原密钥，设为 false 则清除。配置加密保存在工作区 `asr-settings.json`，读取仅返回密钥是否存在，助手不能修改该配置。在线 OpenAI 兼容转写调用 `/audio/transcriptions`，Whisper.cpp 服务调用 `/inference`；需要支持带句段时间戳的 `verbose_json`，不自动重试为另一项付费服务。服务地址遵循自定义上游校验，仅 Whisper.cpp 的显式回环服务允许直接访问。
+
+本地 Windows 运行包使用 whisper.cpp CPU `1.9.2` 和多语言 Base，模型实际 147951465 字节；自动模式优先本地模型，尚未保存配置时读取 `CANVAS_WHISPER_BASE_URL` 作为已有服务。识别任务按实际运行端与配置生成不含密钥的指纹，排队期间服务或密钥变化会要求重新提交。时间戳包括句段及近似 token，不能承诺精确逐字切点。
+同一官方会话新增 `workflow_read` 和 `workflow_checkpoint`；多步生成按真实 `workflowId/stepId` 固定提交身份。步骤记录不代替运行端状态或付费确认。
 
 ## 统一操作层与内置创作助手
 
@@ -101,13 +142,13 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 
 ### 外部客户端连接
 
-桌面设置的「外部 Agent」提供 Codex、Claude Code、Claude Desktop、Cursor 及其他 MCP 客户端的接入配置。Claude Desktop 使用开发者设置中的 `mcpServers` JSON；Claude Code 使用终端命令，Windows 命令需在 PowerShell 运行。保留其他 MCP 服务配置，连接时保持 BeefTV 开启。
+桌面设置的「外部 Agent」提供 Codex、Claude Code、Claude Desktop、Cursor 及其他 MCP 客户端的接入配置。Claude Desktop 使用开发者设置中的 `mcpServers` JSON；Claude Code 使用终端命令，Windows 命令需在 PowerShell 运行。保留其他 MCP 服务配置，连接时保持 Seal 开启。
 
-配置固定使用随包 CLI 的绝对路径和 `BEEFTV_DATA_DIR`，避免客户端继承的环境选错工作区。Windows CLI 为主程序旁的 `cli/beeftv.exe`，不要把桌面主程序 `BeefTV.exe` 用作 MCP 命令。安装文件不完整时，`POST /agent-clients` 返回 412 / `cli_unavailable`，不签发凭据；重新下载并完整解压后重试。
+配置固定使用随包 CLI 的绝对路径和 `BEEFTV_DATA_DIR`，避免客户端继承的环境选错工作区。Windows CLI 为主程序旁的 `cli/beeftv.exe`，不要把桌面主程序 `Seal.exe` 用作 MCP 命令。安装文件不完整时，`POST /agent-clients` 返回 412 / `cli_unavailable`，不签发凭据；重新下载并完整解压后重试。
 
 MCP 使用官方 Go SDK 的 stdio transport；stdout 只写协议消息，启动诊断写 stderr。未发现运行实例时返回 `runtime_not_found`，不猜测默认端口；读取操作清单的启动等待上限为 5 秒。
 
-Windows 的运行地址描述文件位于用户目录的 `.beeftv/runtime/`，按数据目录的规范化路径摘要分开保存，并校验工作区身份。该位置在 AppData 外，客户端不再读取 AppData 中旧的 `runtime.json`，避免 Microsoft Store/MSIX 客户端的私有副本遮住真实实例。数据库和素材仍留在原工作区。升级后保持 BeefTV 开启，并在「外部 Agent」重新生成连接配置。
+Windows 的运行地址描述文件位于用户目录的 `.beeftv/runtime/`，按数据目录的规范化路径摘要分开保存，并校验工作区身份。该位置在 AppData 外，客户端不再读取 AppData 中旧的 `runtime.json`，避免 Microsoft Store/MSIX 客户端的私有副本遮住真实实例。数据库和素材仍留在原工作区。升级后保持 Seal 开启，并在「外部 Agent」重新生成连接配置。
 
 ### 只读边界
 
@@ -138,11 +179,49 @@ Windows 的运行地址描述文件位于用户目录的 `.beeftv/runtime/`，�
 
 NewAPI Channel 2 与 BeefAPI 视频的暂时下载断连会保留原任务 ID 并继续后台取回，自动恢复最长到任务开始后 24 小时；超出窗口后可在失败任务详情手动取回。任务日志接口提供脱敏的 `summary`，不返回原始 `message` / `payload` 内容；摘要不写回数据库。
 
-任务列表与详情中的 `errorCode` 是 BeefTV 归类后的错误类别，不能当作上游原始代码。已识别的 SQLite 缺表/列、锁定、只读、I/O 和约束失败使用 `local_storage`，提示本地数据库无法读写、不自动重试；不能因为外层 HTTP 400 把它归为模型参数错误。判断只读取实际错误消息，不读取请求或提示词回显。新记录的失败任务可包含 `failureDiagnostics`：`source` 区分本地校验、上游 HTTP / 业务响应、本地结果处理及未知来源；`summary` 保存脱敏后的错误摘要，另带实际记录到的 `providerCode`、`httpStatus`、`param`、`requestId`、`providerTaskId`、`stage` 和 `capturedAt`。缺失信息不推断或补造。`createdAt` 是任务创建时间，`completedAt` 是结束时间，均不等于错误记录时间。
+任务列表与详情中的 `errorCode` 是 Seal 归类后的错误类别，不能当作上游原始代码。已识别的 SQLite 缺表/列、锁定、只读、I/O 和约束失败使用 `local_storage`，提示本地数据库无法读写、不自动重试；不能因为外层 HTTP 400 把它归为模型参数错误。判断只读取实际错误消息，不读取请求或提示词回显。新记录的失败任务可包含 `failureDiagnostics`：`source` 区分本地校验、上游 HTTP / 业务响应、本地结果处理及未知来源；`summary` 保存脱敏后的错误摘要，另带实际记录到的 `providerCode`、`httpStatus`、`param`、`requestId`、`providerTaskId`、`stage` 和 `capturedAt`。缺失信息不推断或补造。`createdAt` 是任务创建时间，`completedAt` 是结束时间，均不等于错误记录时间。
 
 诊断字段在本地 schema v3 中以可空文本列保存，旧任务不补写原始错误，重试会清除上一轮诊断。任务列表、详情和画布的“复制排查信息”使用同一份诊断；复制内容不包含请求正文、提示词、凭据、素材 URL 或本地文件路径。`providerRequestId` 可能是供应商任务标识，在复制内容中标作“服务端关联 ID”，与 HTTP 请求 ID 分开。
 
 `failureDiagnostics` 同时保留本轮执行证据：运行版本和平台、任务配置中的模型/尺寸/质量/数量、提示词长度、参考素材数量与图片大小、本地参考图限制，以及最多 8 次请求（首次及最近 7 次，省略数量另计）的发起状态、HTTP 状态、请求 ID、开始时间、耗时和字节数。任务配置不等于最终出站参数；协议可能转换或省略字段，核对实际发送值须凭请求 ID 关联请求日志。HTTP 200 仅表示收到响应；`executionResult=completed` 才表示生成处理完成。转后台回查时状态为 `pending`，同一次任务继续累积有界轨迹并保留首次请求。成功任务也保存这些证据，以便区分后续本地保存失败或画布应用失败（复制内容来源为 `client_result`）。请求轨迹覆盖统一 Provider HTTP 客户端；旧记录、未经过该客户端的插件请求或上游未提供的 ID 仍可能缺失，不能仅凭空轨迹推断未发送。
+
+## 剪辑工程与统一资产库
+
+独立剪辑工程通过 `GET /editing-projects` 列出，`POST /editing-projects` 使用 `{ title, operationId }` 新建，`GET /editing-projects/:projectId` 读取，`PATCH /editing-projects/:projectId` 使用 `{ title }` 重命名。接口校验本机可信界面与当前工作区归属；新建操作身份重放返回同一工程，不创建隐藏画布。工程编号使用 `cut_` 前缀，视频源与原生编辑历史在编辑运行端保存。
+
+本机入口 `POST /edit-projects/:canvasId/open` 接收 `{ parentOrigin, theme }`，返回现成 Studio 的一次性启动票据；`theme` 为产品的 light/dark。这个既有路径参数在独立剪辑页填写 `cut_` 工程编号。操作继续使用 `/edit-projects/:canvasId/edits/:editId/*action`，Go 校验当前用户工程归属，运行端再次校验源工程编号与编辑工程对应关系。独立剪辑工程和画布工程分别保存，只通过统一资产库共享媒体。
+
+- `POST .../assets/import` 接收 `{ assetId, operationId, expectedRevision }`。后端从当前用户资产记录读取 `data.storageKey`，再读取所属本地 READY 资源；不接收浏览器提供的 URL、文件路径或资源元数据。图片默认 5 秒，视频和音频使用资源记录的时长，追加到工程末尾。当前支持 PNG/JPEG/WebP/GIF、MP4/WebM、WAV/MP3/OGG/M4A，单文件最多 512 MB；缺失时长、尺寸或不支持的格式会明确拒绝。工作工程保存独立素材副本及资产/资源编号，导入遵循版本校验、幂等和原生撤销。
+- `GET .../exports` 返回持久导出编号、输入版本、日期、格式及状态。不会返回本地文件路径。
+- `GET .../exports/:exportId/file` 只下载所属工程已完成的 MP4。前端通过原有资源上传与资产持久化流程保存成片，同一导出使用固定上传身份和固定生成效果身份；等待实际资产写入回执后才显示已保存，重开后的重复保存也确认后端持久化。
+
+嵌入 Studio 的所属会话可调用运行端 `POST /api/beeftv/add-text` 添加标题或字幕：接收 `{ text, start, duration, caption }`，批量字幕使用 `cues: [{ text, start, duration }]`。最多 1000 条，每条文字不超过 4000 字符，时间必须有限且位于一天内。该接口仅存在于当前工程的 Studio 网关中，继续要求所属会话 Cookie、同源请求、版本头和操作编号，通过工程事务与原生历史保存；不会接受文件路径或执行用户代码。
+
+新导出文件位于对应冻结导出目录，列表与下载不依赖 Studio 的短期内存任务列表。重新打开已完成结果可读取文件；进程中断时进行中任务的恢复仍待实现。完整桌面包的按钮、来源和 Cookie 联调仍需验收。
+
+### Hypit 制作与候选
+
+`POST /edit-projects/:canvasId/production` 打开当前项目制作工程，返回 `editId`、剪辑版本、Hypit 版本、作者文件哈希及素材输入清单，不创建新的 Agent 会话。下列操作均是 POST，位于 `/edit-projects/:canvasId/edits/:editId/hypit/`：
+
+| 操作 | 请求与结果 |
+| --- | --- |
+| `open` | 读取制作工程身份、文件哈希和已导入输入 |
+| `read` | `{ area: "skill" | "project", file }`，返回允许的官方参考或作者文件内容与 SHA-256 |
+| `write` | `{ file, text, expectedHash, operationId }`；新文件用 null，已有文件必须匹配旧哈希；限制作者文件类型、禁止包安装和凭据配置 |
+| `assets/import` | `{ assetId, operationId, expectedRevision }`；从已保存的所属本地资源复制，返回相对文件路径和 `inputId`，不修改剪辑轨道 |
+| `frames` | `{ inputId, times? }`；图片一帧，视频最多八个有效时刻；返回真实 JPEG 帧，音频不支持画面提取 |
+| `start` | `{ command: "check" | "plan" | "build", source, operationId, expectedRevision, compositionOutput?, timelineOutput? }`；source 为显式 SVRun，冻结输入后调用实际 Hypit，返回任务身份 |
+| `status`、`cancel` | `{ jobId }`；查询实际执行状态或取消。提交不等于制作完成 |
+| `list` | 列出所属制作任务；重启后失去执行进程的任务标记 interrupted，保留输入和结果 |
+| `publish` | `{ jobId }`；只允许已完成的 build，检查结果哈希并产生不可变可编辑候选，不修改主轨道 |
+
+制作运行端固定 Hypit 0.2.17，只配置本地媒体与 HyperFrames 执行端；新素材仍由现有生成提议、审批和资产流程提供。原生作者组件执行当前没有操作系统级沙箱。
+
+`POST .../promote` 用 `{ candidateId, operationId, start?, track?, append?, replaceSceneId?, expectedRevision? }` 提交候选。默认校验制作时版本；`append=true` 在事务内计算末尾；`replaceSceneId` 只替换已有主片段并保留其位置、轨道和长度，候选过短拒绝。追加与替换不能同时指定。人工界面可明确选择当前审阅版本，内置助手不能传 `expectedRevision` 覆盖旧候选保护。后端根据已验证身份写入人工或 Agent 历史，忽略调用方自报的 actor。旧工作副本和候选保留供撤销恢复，不自动合并手动修改。
+
+`POST .../history` 读取实际原生历史。Agent 的指定条目撤销通过已有 `POST .../mutate` 的 `route="history/undo"`，携带稳定操作身份、当前版本及条目编号；后续修改发生冲突时拒绝，Agent 工具不开放强制覆盖。
+
+剪辑接口只接受受信任的本机界面或内置助手宿主。宿主必须出示仍开启、属于当前项目的后端回合；普通界面和已登记外部客户端不能借用回合头。素材导入在宿主调用时还要匹配该回合已经验证的素材范围。运行端再次校验编辑工程归属。这些检查不等同于跨进程取消与文件提交的数据库原子事务。
 
 ## 明确不存在的端点
 
@@ -153,3 +232,23 @@ NewAPI Channel 2 与 BeefAPI 视频的暂时下载断连会保留原任务 ID �
 内置 BeefAPI 连接成功后，同一份企业凭证用于渠道请求和模型目录。企业连接、模型目录、Provider/Protocol 与自定义渠道不受 Agent 退场影响。
 
 内置 BeefAPI 的 Seedance 视频任务由本机后端上传参考素材后再向上游提交链接；浏览器不直接访问该上传接口，也不把整份参考文件放进本地 `/tasks` 请求。本机已保存的参考文件即使工作区已有公开访问地址，也仍由本机后端上传后再提交链接。失败时不会自动重提生成。
+
+## HyperFrames 本地创作接口
+
+以下路径均位于 `/api/edit-projects/:projectId/edits/:editId`，要求可信本机 UI，或属于当前项目的开放助手轮次。
+编辑运行端再次核对 `editId` 与项目归属，不接收客户端指定的 CLI 路径、任意命令或工作目录。
+
+| POST 路径 | 请求与行为 |
+| --- | --- |
+| `/hyperframes/context` | 当前时间线、选区、尺寸、fps 和版本 |
+| `/hyperframes/candidate` | `baseRevision, html, css, script, duration, width, height, fps?, assets?`；创建不可变候选，素材绑定为 `{source,path}`，均为工程内相对路径 |
+| `/hyperframes/candidates` | 列出已有候选，前端按 `kind=hyperframes` 展示动效结果 |
+| `/hyperframes/inspect` | `candidateId, command`；仅允许固定 CLI 的 `lint/check/snapshot`，返回报告与实际 PNG |
+| `/hyperframes/review` | `candidateId`；读取已有检查与画面，不重新执行 CLI |
+| `/promote` | 共用入轨接口；要求候选内容完整、官方 check 浏览器实际运行通过且有截图，来源版本一致，写入原生历史 |
+| `/hyperframes/export` | `operationId, expectedRevision, fps?, quality?`；质量为 `draft/standard/high`，通过现有 Studio 启动冻结 MP4 导出 |
+| `/hyperframes/exports` | 读取本工程持久导出状态；已完成文件沿用原有 `/exports/:exportId/file` |
+
+`/promote` 的人工提交可显式传当前 `expectedRevision`。助手传该覆盖字段会被拒绝，防止制作期间的人工编辑被静默覆盖。
+`candidate_check_required` 表示候选没有完整且匹配内容的检查回执；`revision_conflict` 保留候选，供用户查看后处理。
+官方 Skill 与 CLI 均固定 `0.8.130`；产品不提供任意 shell、远程安装、自动更新或云发布入口。

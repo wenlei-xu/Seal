@@ -586,6 +586,36 @@ add({
 });
 
 add({
+  id: "doubao-tts", providerId: "doubao-tts", name: "豆包语音合成", vendor: "火山引擎", capability: "audio",
+  baseUrl: "https://openspeech.bytedance.com", auth: { type: "header", field: "apiKey", header: "X-Api-Key" }, params: audioParams,
+  validations: [{ assert: gt(len(ref("request.providerOptions.doubao-tts.voice")), 0), message: "请填写豆包控制台中的音色 ID" }],
+  create: jsonCreate("/api/v3/tts/unidirectional/sse", {
+    user: { uid: "beeftv" },
+    req_params: { text: ref("request.prompt"), speaker: ref("request.providerOptions.doubao-tts.voice"), sample_rate: 24000,
+      audio_params: { format: "mp3", speech_rate: { $toInt: { $min: [100, { $max: [-50, { $multiply: [{ $add: [coalesce(nonZeroFloat(ref("request.extra.audioSpeed")), 1), -1] }, 100] }] }] } } }
+    }
+  }, { headers: { "X-Api-Resource-Id": ref("request.model"), "X-Api-Request-Id": ref("request.extra.idempotencyKey") }, audioStream: { transport: "http-sse", audioPath: "data", codePath: "code", donePath: "code", doneValue: 20000000 } }),
+  response: { binaryPayload: true, resultKind: "audio", status: "succeeded" },
+  notes: "使用新版语音控制台 API Key；资源 ID 默认 seed-tts-2.0，音色必须与资源匹配。HTTP SSE 音频帧按顺序解码并合并，必须收到完整结束标识。当前输出 MP3、24000Hz。官方文档 https://www.volcengine.com/docs/6561/1598757。"
+});
+
+add({
+  id: "xfyun-tts", providerId: "xfyun-tts", name: "科大讯飞在线语音合成", vendor: "科大讯飞", capability: "audio",
+  baseUrl: "https://tts-api.xfyun.cn", auth: { type: "xfyun-ws", field: "apiKey", secretField: "secretKey" }, params: audioParams,
+  configuration: config([{ name: "secretKey", type: "secret", label: "API Secret", required: true }]),
+  validations: [{ assert: gt(len(ref("request.providerOptions.xfyun-tts.appId")), 0), message: "请填写讯飞 APPID" }, { assert: gt(len(ref("request.providerOptions.xfyun-tts.voice")), 0), message: "请填写讯飞控制台已开通的发音人 ID" }, { assert: { $lt: [{ $utf8Length: ref("request.prompt") }, 8000] }, message: "讯飞单次在线合成文本必须小于 8000 字节" }],
+  create: jsonCreate("/v2/tts", {
+    common: { app_id: ref("request.providerOptions.xfyun-tts.appId") },
+    business: { aue: "lame", sfl: 1, auf: "audio/L16;rate=16000", vcn: ref("request.providerOptions.xfyun-tts.voice"), tte: "UTF8",
+      speed: { $toInt: { $min: [100, { $max: [0, { $multiply: [coalesce(nonZeroFloat(ref("request.extra.audioSpeed")), 1), 50] }] }] } }
+    },
+    data: { status: 2, text: { $base64: ref("request.prompt") } }
+  }, { audioStream: { transport: "websocket", audioPath: "data.audio", codePath: "code", donePath: "data.status", doneValue: 2 } }),
+  response: { binaryPayload: true, resultKind: "audio", status: "succeeded" },
+  notes: "使用在线语音合成（流式版）APPID、API Key、API Secret，不能使用讯飞其他产品的凭证。宿主使用 WSS 并计算 HMAC-SHA256 签名，签名地址不保存或返回浏览器；逐帧解码音频，完整结束后返回 MP3、16000Hz。官方文档 https://www.xfyun.cn/doc/tts/online_tts/API.html。"
+});
+
+add({
   id: "async-audio", providerId: "async-audio", name: "Async Audio Tasks", vendor: "OpenAI compatible", capability: "audio",
   baseUrl: "https://api.openai.com", auth: bearer, params: audioParams,
   notes: "异步音频任务：创建 /v1/audio/tasks，轮询同一路径，结果优先 URL，否则下载 /content。",

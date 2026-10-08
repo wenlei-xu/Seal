@@ -1,0 +1,35 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createProjectStore } from '../project-store.mjs';
+import { initializeProject } from '../starter.mjs';
+import { createStudioGateway } from '../studio-gateway.mjs';
+
+test('official Studio is served only after a one-use origin-bound ticket; all writes require CAS', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'beeftv-studio-test-'));
+  const store = createProjectStore(root);
+  const edit = await store.ensure('canvas_test');
+  await initializeProject(store.workDir(edit.editId));
+  const gateway = createStudioGateway(store);
+  t.after(async () => { await gateway.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const owned = await gateway.open(edit.editId);
+  assert.equal((await fetch(owned.origin)).status, 403);
+  const { ticket } = owned.ticket('http://127.0.0.1:5173');
+  const launch = await fetch(`${owned.origin}/__session`, { method: 'POST', headers: { Origin: 'http://127.0.0.1:5173' }, body: new URLSearchParams({ ticket }), redirect: 'manual' });
+  assert.equal(launch.status, 303);
+  const cookie = launch.headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(`${owned.origin}/__session`, { method: 'POST', headers: { Origin: 'http://127.0.0.1:5173' }, body: new URLSearchParams({ ticket }), redirect: 'manual' })).status, 403);
+  const html = await (await fetch(owned.origin, { headers: { Cookie: cookie } })).text();
+  assert.match(html, /HyperFrames Studio/);
+  assert.match(html, /X-Beeftv-Edit-Revision/);
+  assert.equal((await fetch(`${owned.origin}/api/projects`, { headers: { Cookie: cookie, Origin: 'https://evil.example' } })).status, 403);
+  const target = `${owned.origin}/api/projects/${edit.editId}/files/notes.txt`;
+  const headers = { Cookie: cookie, Origin: owned.origin, 'X-Beeftv-Edit-Revision': '0', 'X-Beeftv-Operation': 'human_save' };
+  assert.equal((await fetch(target, { method: 'POST', headers, body: 'human edit' })).status, 201);
+  assert.equal((await fetch(target, { method: 'POST', headers, body: 'human edit' })).status, 201);
+  assert.equal((await store.state(edit.editId)).revision, 1);
+  assert.equal((await fetch(target, { method: 'PUT', headers: { ...headers, 'X-Beeftv-Operation': 'stale_agent' }, body: 'overwrite' })).status, 409);
+  assert.equal(await fs.readFile(path.join(store.workDir(edit.editId), 'notes.txt'), 'utf8'), 'human edit');
+});

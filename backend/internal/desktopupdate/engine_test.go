@@ -18,6 +18,9 @@ import (
 )
 
 func TestEngineDisabledKeepsCurrentVersion(t *testing.T) {
+	oldFeed, oldKey := FeedURL, PublicKey
+	FeedURL, PublicKey = "", ""
+	t.Cleanup(func() { FeedURL, PublicKey = oldFeed, oldKey })
 	engine := NewWithOptions(Options{CurrentVersion: "v1.5.1"})
 	state := engine.Status()
 	if state.Status != StatusDisabled || state.CurrentVersion != "v1.5.1" {
@@ -29,6 +32,20 @@ func TestEngineDisabledKeepsCurrentVersion(t *testing.T) {
 	}
 	if state.Status != StatusDisabled || state.CurrentVersion != "v1.5.1" {
 		t.Fatalf("%+v", state)
+	}
+}
+
+func TestUnpublishedGitHubFeedIsIdleWithoutError(t *testing.T) {
+	pub, _, err := GenerateTestKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
+	t.Cleanup(server.Close)
+	engine := NewWithOptions(Options{CurrentVersion: "v1.7.7", FeedURL: server.URL, PublicKey: pub, Platform: "windows-amd64", Client: server.Client(), StagingRoot: t.TempDir()})
+	state, err := engine.CheckForUpdate(context.Background())
+	if err != nil || state.Status != StatusIdle || state.Error != "" || state.LatestVersion != "" || state.ReleaseNotes != "尚未发布公开更新" {
+		t.Fatalf("state=%+v err=%v", state, err)
 	}
 }
 
@@ -54,7 +71,7 @@ func TestCheckDownloadInstallHappyPath(t *testing.T) {
 		case "/desktop-update.json":
 			payload := testPayload("v1.6.0", "darwin-arm64", "https://example.invalid/placeholder", hex.EncodeToString(sum[:]), int64(len(zipBytes)), "新版本说明")
 			payload.Platforms["darwin-arm64"] = PlatformArtifact{
-				URL:    "https://" + r.Host + "/BeefTV.zip",
+				URL:    "https://" + r.Host + "/Seal.zip",
 				SHA256: hex.EncodeToString(sum[:]),
 				Size:   int64(len(zipBytes)),
 			}
@@ -66,7 +83,7 @@ func TestCheckDownloadInstallHappyPath(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(body)
-		case "/BeefTV.zip":
+		case "/Seal.zip":
 			w.Header().Set("Content-Type", "application/zip")
 			_, _ = w.Write(zipBytes)
 		default:
@@ -93,8 +110,17 @@ func TestCheckDownloadInstallHappyPath(t *testing.T) {
 	}
 
 	var quit bool
+	logDir := t.TempDir()
+	t.Cleanup(func() {
+		if t.Failed() {
+			if data, err := os.ReadFile(updateLogPath(logDir)); err == nil {
+				t.Log(string(data))
+			}
+		}
+	})
 	engine := NewWithOptions(Options{
 		CurrentVersion: "v1.5.1",
+		DataDir:        logDir,
 		FeedURL:        server.URL + "/latest",
 		PublicKey:      pub,
 		Platform:       "darwin-arm64",
@@ -134,7 +160,7 @@ func TestCheckDownloadInstallHappyPath(t *testing.T) {
 		t.Fatal("expected orderly quit after helper prepared")
 	}
 	time.Sleep(50 * time.Millisecond)
-	got, err := os.ReadFile(filepath.Join(oldRoot, appBundleName, "Contents", "MacOS", "BeefTV"))
+	got, err := os.ReadFile(filepath.Join(oldRoot, appBundleName, "Contents", "MacOS", "Seal"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +273,7 @@ func TestConcurrentCallsRejectedAndStatusReadableDuringDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 	files, execFiles := DarwinZipFiles("NEW")
-	files["BeefTV.app/Contents/Resources/padding.bin"] = []byte(strings.Repeat("p", 8*1024))
+	files["Seal.app/Contents/Resources/padding.bin"] = []byte(strings.Repeat("p", 8*1024))
 	zipPath := filepath.Join(t.TempDir(), "app.zip")
 	if err := WriteZip(zipPath, files, execFiles); err != nil {
 		t.Fatal(err)
@@ -268,7 +294,7 @@ func TestConcurrentCallsRejectedAndStatusReadableDuringDownload(t *testing.T) {
 			_, _ = w.Write(body)
 			return
 		}
-		if r.URL.Path == "/BeefTV.zip" {
+		if r.URL.Path == "/Seal.zip" {
 			flusher, _ := w.(http.Flusher)
 			for i := 0; i < len(zipBytes); i += 1024 {
 				end := i + 1024
@@ -345,7 +371,7 @@ func signedFeedServer(t *testing.T, priv ed25519.PrivateKey, payload Payload, zi
 				return
 			}
 			_, _ = w.Write(body)
-		case "/BeefTV.zip":
+		case "/Seal.zip":
 			w.Header().Set("Content-Length", strconv.Itoa(len(zipBytes)))
 			_, _ = w.Write(zipBytes)
 		default:
@@ -366,7 +392,7 @@ func rewriteArtifactURL(payload Payload, host string, zipBytes []byte, sum []byt
 		if hash == "" {
 			hash = hex.EncodeToString(sum)
 		}
-		artifact.URL = "https://" + host + "/BeefTV.zip"
+		artifact.URL = "https://" + host + "/Seal.zip"
 		artifact.SHA256 = hash
 		artifact.Size = size
 		payload.Platforms[name] = artifact

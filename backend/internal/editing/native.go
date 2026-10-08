@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -18,6 +20,22 @@ const (
 func ResolveFFmpegBinary() (string, error) {
 	if configured := strings.TrimSpace(os.Getenv(FFmpegPathEnv)); configured != "" {
 		return configured, nil
+	}
+	root := ""
+	if entry := strings.TrimSpace(os.Getenv("BEEFTV_EDIT_HOST_ENTRY")); filepath.IsAbs(entry) {
+		root = filepath.Dir(entry)
+	} else if executable, err := os.Executable(); err == nil {
+		root = filepath.Join(filepath.Dir(executable), "edit-host")
+	}
+	name := "ffmpeg"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if root != "" {
+		bundled := filepath.Join(root, "media", "ffmpeg", "bin", name)
+		if info, err := os.Stat(bundled); err == nil && info.Mode().IsRegular() {
+			return bundled, nil
+		}
 	}
 	path, err := exec.LookPath("ffmpeg")
 	if err != nil {

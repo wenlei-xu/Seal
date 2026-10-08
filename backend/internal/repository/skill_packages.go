@@ -19,7 +19,15 @@ func (r *Repository) CreateSkillWithPackage(skill *model.Skill, version *model.S
 				return err
 			}
 		}
-		return tx.Create(ownerState).Error
+		if ownerState != nil {
+			if err := tx.Create(ownerState).Error; err != nil {
+				return err
+			}
+			if ownerState.RuntimeEnabled != nil {
+				return bumpSkillRevision(tx, ownerState.UserID)
+			}
+		}
+		return nil
 	})
 }
 

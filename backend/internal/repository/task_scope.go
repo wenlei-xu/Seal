@@ -20,7 +20,7 @@ var (
 // before Create/Updates.
 //
 // Empty ProjectID stays allowed for standalone text/media. A nonempty id must
-// be an owned personal canvas or an owned active business project. A canvas
+// be an owned personal canvas, independent editing project or active business project. A canvas
 // linked to a business project re-checks that project's active ownership here.
 // Unknown, foreign, deleted, and archived ids fail closed; an unknown id is
 // not admitted merely because it is not a business project.
@@ -33,6 +33,17 @@ func RequireTaskScopeActiveTx(tx *gorm.DB, userID, canvasOrProjectID string) err
 		return gorm.ErrInvalidDB
 	}
 	id := strings.TrimSpace(canvasOrProjectID)
+	if strings.HasPrefix(id, "cut_") {
+		if err := lockOwnedRowTx(tx, &model.EditingProject{}, userID, id); err != nil {
+			return err
+		}
+		var edit model.EditingProject
+		err := tx.Select("id").Where("user_id = ? AND id = ?", userID, id).First(&edit).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrTaskScopeNotActive
+		}
+		return err
+	}
 	if id == "" {
 		return nil
 	}

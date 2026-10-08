@@ -952,7 +952,7 @@ export function modelOptionLabel(config: AiConfig, value: string) {
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
     return uniqueModelOptions(
-        channels.flatMap((channel) =>
+        channels.filter((channel) => channel.enabled !== false).flatMap((channel) =>
             channel.models
                 .map(normalizeRawModelName)
                 .filter(Boolean)

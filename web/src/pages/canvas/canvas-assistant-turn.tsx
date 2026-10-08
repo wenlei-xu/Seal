@@ -1,13 +1,18 @@
 import { Button } from "antd";
 import { Crosshair, Undo2 } from "lucide-react";
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { agentAssistantFailureText, type AgentToolCall, type AssistantGenerationProposal, type AssistantTurn } from "@/services/api/agent-assistant";
+import { agentAssistantFailureText, type AgentToolCall, type AssistantGenerationProposal, type AssistantTurn, type AssistantWorkflow, type AssistantSkillUse } from "@/services/api/agent-assistant";
+import { CreatorWorkflow } from './creator-workflow';
 import { assistantChangeSummary, assistantChangedNodeIds, assistantProposalText, assistantUnresolvedFailures, assistantUndoFailureText, assistantVisibleReply } from "./canvas-assistant-copy";
 import { dismissedProposalKey, type AssistantTurnStatus } from "./use-canvas-assistant";
 
 type Props = {
+    projectId?: string;
+    resumeDisabled?: boolean;
+    onResumeWorkflow?: (workflow: AssistantWorkflow, turn: AssistantTurn) => void;
     turn: AssistantTurn;
     status?: AssistantTurnStatus;
     handledProposals: Set<string>;
@@ -16,6 +21,7 @@ type Props = {
     onUndo: (turnId: string) => void;
     onRunProposal: (proposal: AssistantGenerationProposal) => void;
     onDismissProposal: (proposalId: string) => void;
+    proposalActionLabel?: string;
 };
 
 /** 助手回复用 Markdown 渲染，只走 react-markdown 的安全默认值，不放开原始 HTML。 */
@@ -29,16 +35,17 @@ export function CanvasAssistantReply({ text }: { text: string }) {
     );
 }
 
-export function CanvasAssistantUserMessage({ text, selectedCount }: { text: string; selectedCount: number }) {
+export function CanvasAssistantUserMessage({ text, selectedCount, requestedSkill }: { text: string; selectedCount: number; requestedSkill?: AssistantSkillUse | null }) {
     return (
         <div className="canvas-assistant-user">
             <span style={{ whiteSpace: "pre-wrap" }}>{text}</span>
+            {requestedSkill ? <span className="canvas-assistant-meta">指定技能：{requestedSkill.displayName || requestedSkill.name}</span> : null}
             {selectedCount > 0 ? <span className="canvas-assistant-meta">带上了已选的 {selectedCount} 个节点</span> : null}
         </div>
     );
 }
 
-export function CanvasAssistantTurnView({ turn, status, handledProposals, proposalFeedback, onLocate, onUndo, onRunProposal, onDismissProposal }: Props) {
+export const CanvasAssistantTurnView = memo(function CanvasAssistantTurnView({ turn, status, handledProposals, proposalFeedback, onLocate, onUndo, onRunProposal, onDismissProposal, projectId, onResumeWorkflow, resumeDisabled, proposalActionLabel = '生成' }: Props) {
     const summary = assistantChangeSummary(turn.change);
     const changedNodeIds = assistantChangedNodeIds(turn.change);
     const failedActions = assistantUnresolvedFailures(turn.toolCalls);
@@ -46,9 +53,11 @@ export function CanvasAssistantTurnView({ turn, status, handledProposals, propos
 
     return (
         <div className="canvas-assistant-turn">
-            <CanvasAssistantUserMessage text={turn.userText} selectedCount={turn.selectedNodeIds?.length ?? 0} />
+            <CanvasAssistantUserMessage text={turn.userText} selectedCount={turn.selectedNodeIds?.length ?? 0} requestedSkill={turn.requestedSkill} />
             {turn.reply ? <CanvasAssistantReply text={turn.reply} /> : null}
+            {turn.skillsUsed?.length ? <p className="canvas-assistant-meta">本轮已读取技能：{turn.skillsUsed.map(skill => skill.displayName || skill.name).join('、')}</p> : null}
             {turn.cancelled ? <p className="canvas-assistant-meta">这一条已经停下了。</p> : null}
+            {projectId && onResumeWorkflow ? turn.workflows?.map(workflow => <CreatorWorkflow key={workflow.id} workflow={workflow} projectId={projectId} disabled={Boolean(resumeDisabled)} onResume={() => onResumeWorkflow(workflow, turn)} />) : null}
             {turn.error ? <p className="canvas-assistant-failed" role="status">{agentAssistantFailureText(turn.errorReason ?? undefined, "这一轮没有全部完成，请核对已经落地的改动。")}</p> : null}
 
             {failedActions.length > 0 ? (
@@ -97,7 +106,7 @@ export function CanvasAssistantTurnView({ turn, status, handledProposals, propos
                             <span className="canvas-assistant-meta">这次没有生成</span>
                         ) : (
                             <div className="canvas-assistant-card-actions">
-                                <Button size="small" type="primary" autoInsertSpace={false} onClick={() => onRunProposal(proposal)}>生成</Button>
+                                <Button size="small" type="primary" autoInsertSpace={false} onClick={() => onRunProposal(proposal)}>{proposal.assetGeneration ? '确认并生成' : proposalActionLabel}</Button>
                                 <Button size="small" onClick={() => onDismissProposal(proposal.proposalId)}>先不用</Button>
                             </div>
                         )}
@@ -106,4 +115,4 @@ export function CanvasAssistantTurnView({ turn, status, handledProposals, propos
             })}
         </div>
     );
-}
+});

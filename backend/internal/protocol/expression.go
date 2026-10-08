@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -306,13 +307,17 @@ func evaluateManifestOperator(operator string, operand any, env map[string]any) 
 			return nil, err
 		}
 		return value, nil
-	case "$lower", "$upper", "$trim", "$toString", "$toInt", "$toFloat", "$toBool", "$dataMime", "$dataPayload", "$json":
+	case "$lower", "$upper", "$trim", "$toString", "$toInt", "$toFloat", "$toBool", "$dataMime", "$dataPayload", "$json", "$base64", "$utf8Length":
 		value, err := evaluateManifestValue(operand, env)
 		if err != nil {
 			return nil, err
 		}
 		text := manifestString(value)
 		switch operator {
+		case "$utf8Length":
+			return len([]byte(text)), nil
+		case "$base64":
+			return base64.StdEncoding.EncodeToString([]byte(text)), nil
 		case "$lower":
 			return strings.ToLower(text), nil
 		case "$upper":

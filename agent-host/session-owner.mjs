@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import { createAgentSession, SessionManager } from '@earendil-works/pi-coding-agent';
 import { sessionActionIdentity } from './session-identity.mjs';
 import { newTurnAccumulator, projectTurnHistory, sessionTitle } from './canvas-turn.mjs';
+import { workflowJournal } from './workflow-journal.mjs';
 import { createFullControlLoader } from './full-control-loader.mjs';
 import { createHostSettingsManager } from './session-settings.mjs';
 import { createTurnObserver } from './lifecycle-events.mjs';
@@ -31,10 +32,9 @@ function storeClosedError() {
   return error;
 }
 
-export function createSessionStore({ sessionRoot, workspaceRoot, agentDir, runId, getModelRuntime, getModel }) {
+export function createSessionStore({ sessionRoot, workspaceRoot, agentDir, runId, getModelRuntime, getModel, resourceLoader: suppliedResourceLoader, resourceLoaderFactory }) {
   const sessions = new Map();
   const canvasLocks = new Map();
-  const resourceLoader = createFullControlLoader();
   let closed = false;
   let inFlightLocks = 0;
   let idleResolvers = [];
@@ -155,6 +155,7 @@ export function createSessionStore({ sessionRoot, workspaceRoot, agentDir, runId
   }
 
   async function createLiveSession({ canvasId, sessionId, buildTools }) {
+    const resourceLoader = resourceLoaderFactory?.() || suppliedResourceLoader || createFullControlLoader();
     const cwd = canvasWorkspace(canvasId);
     const log = [];
     const generation = { aborted: false };
@@ -170,6 +171,7 @@ export function createSessionStore({ sessionRoot, workspaceRoot, agentDir, runId
     const persistedId = (typeof manager.getSessionId === 'function' && manager.getSessionId()) ||
       (typeof manager.getSessionFile === 'function' && manager.getSessionFile() ? path.basename(String(manager.getSessionFile())) : '') || '';
     const identity = sessionActionIdentity({ persistedId, runId });
+    turn.workflowJournal = workflowJournal(manager, identity.prefix);
     console.error(`agent-host: 会话 ${canvasId} 的动作身份来源 = ${identity.source}（persistence=${persistence}）`);
     const tools = buildTools(canvasId, log, generation, turn, identity.prefix);
     const { session } = await createAgentSession({
@@ -185,6 +187,9 @@ export function createSessionStore({ sessionRoot, workspaceRoot, agentDir, runId
       sessionManager: manager,
     });
     return {
+      resourceLoader,
+      skillRevision: null,
+      skillUserScope: null,
       sessionId: manager.getSessionId(),
       session,
       manager,
@@ -267,11 +272,20 @@ export function createSessionStore({ sessionRoot, workspaceRoot, agentDir, runId
     return withCanvasLock(canvasId, () => ensureSessionUnlocked(canvasId, buildTools));
   }
 
-  function acquireChatSession(canvasId, buildTools, requestedSessionId = '') {
+  function acquireChatSession(canvasId, buildTools, requestedSessionId = '', skillSnapshot) {
     return withCanvasLock(canvasId, async () => {
       const entry = await ensureSessionUnlocked(canvasId, buildTools);
       if (requestedSessionId && requestedSessionId !== entry.sessionId) throw sessionNotCurrentError();
       if (entry.busy) throw sessionBusyError();
+      if (skillSnapshot) {
+        if (entry.skillUserScope && entry.skillUserScope !== skillSnapshot.userScope) throw new Error('skill_user_scope_mismatch');
+        if (entry.skillRevision !== skillSnapshot.revision) {
+          entry.resourceLoader.setSnapshot(skillSnapshot);
+          await entry.session.reload();
+          entry.skillRevision = skillSnapshot.revision;
+          entry.skillUserScope = skillSnapshot.userScope;
+        }
+      }
       entry.busy = true;
       entry.generation.aborted = false;
       return entry;

@@ -1,0 +1,75 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { Readable } from 'node:stream';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createProjectStore, atomicJson } from '../project-store.mjs';
+import { createHypitProductions } from '../hypit-productions.mjs';
+
+const run = promisify(execFile);
+const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+test('reference videos are copied, decoded at bounded times and reject altered inputs or another project', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'beeftv-hypit-input-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = createProjectStore(root), edit = await store.ensure('input_test');
+  const other = await store.ensure('other');
+  const productions = createHypitProductions(store, {});
+  await productions.open(edit.editId); await productions.open(other.editId);
+  const video = path.join(root, 'reference.mp4');
+  await run('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=64x96:r=24:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', video], { windowsHide: true });
+  const bytes = await fs.readFile(video);
+  const metadata = { assetId: 'reference', resourceId: 'saved-video', kind: 'video', mimeType: 'video/mp4', durationMs: 1000, width: 64, height: 96, size: bytes.length, operationId: 'input_one', expectedRevision: 0 };
+  const imported = await productions.importAsset(edit.editId, metadata, Readable.from(bytes));
+  assert.equal((await store.state(edit.editId)).revision, 0, 'Reference admission does not edit the timeline');
+  const viewed = await productions.frames(edit.editId, { inputId: imported.inputId, times: [0, 0.5] });
+  assert.equal(viewed.frames.length, 2);
+  assert.deepEqual(Buffer.from(viewed.frames[0].data, 'base64').subarray(0, 2), Buffer.from([0xff, 0xd8]));
+  await assert.rejects(productions.frames(edit.editId, { inputId: imported.inputId, times: [1] }), { reason: 'invalid_frame_times' });
+  await assert.rejects(productions.frames(edit.editId, { inputId: imported.inputId, times: Array(9).fill(0) }), { reason: 'invalid_frame_times' });
+  await assert.rejects(productions.frames(other.editId, { inputId: imported.inputId, times: [0] }), { code: 'ENOENT' });
+  await assert.rejects(productions.importAsset(edit.editId, { ...metadata, operationId: 'wrong_size', size: bytes.length - 1 }, Readable.from(bytes)), { reason: 'media_size_mismatch' });
+  await assert.rejects(productions.importAsset(edit.editId, { ...metadata, assetId: 'changed' }, Readable.from(bytes)), { reason: 'operation_reused' });
+  await fs.appendFile(path.join(store.editDir(edit.editId), 'hypit/project', imported.file), 'changed');
+  await assert.rejects(productions.frames(edit.editId, { inputId: imported.inputId, times: [0] }), { reason: 'input_changed' });
+});
+
+test('interrupted source receipts reconcile unchanged committed bytes and preserve subsequent manual edits', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'beeftv-hypit-write-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = createProjectStore(root), edit = await store.ensure('write_test');
+  let productions = createHypitProductions(store, {});
+  await productions.open(edit.editId);
+  const input = { file: 'note.md', text: 'Saved', expectedHash: null, operationId: 'write_one' };
+  const file = path.join(store.editDir(edit.editId), 'hypit/project/note.md');
+  const receipt = path.join(store.editDir(edit.editId), 'hypit/writes/write_one.json');
+  await atomicJson(receipt, { key: sha(JSON.stringify(input)), state: 'pending', result: { file: input.file, sha256: sha(input.text) } });
+  await fs.writeFile(file, input.text);
+  productions = createHypitProductions(createProjectStore(root), {});
+  assert.equal((await productions.write(edit.editId, input)).replayed, true);
+  assert.equal(JSON.parse(await fs.readFile(receipt, 'utf8')).state, 'complete');
+  await atomicJson(receipt, { key: sha(JSON.stringify(input)), state: 'pending', result: { file: input.file, sha256: sha(input.text) } });
+  await fs.writeFile(file, 'Manual revision');
+  await assert.rejects(productions.write(edit.editId, input), { reason: 'source_conflict' });
+  assert.equal(await fs.readFile(file, 'utf8'), 'Manual revision');
+});
+
+test('reopened production jobs retain inputs, report interruption and leave the editable timeline alone', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'beeftv-hypit-reopen-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = createProjectStore(root), edit = await store.ensure('reopen_test');
+  const directory = path.join(store.editDir(edit.editId), 'hypit/jobs/job_interrupted');
+  await fs.mkdir(path.join(directory, 'project'), { recursive: true });
+  await fs.writeFile(path.join(directory, 'project/main.svml'), 'Frozen author source');
+  await atomicJson(path.join(directory, 'state.json'), { jobId: 'job_interrupted', editId: edit.editId, status: 'running', command: 'build', createdAt: new Date().toISOString() });
+  await fs.mkdir(path.join(store.editDir(edit.editId), 'hypit/jobs/job_partial'), { recursive: true });
+  const productions = createHypitProductions(createProjectStore(root), {});
+  const jobs = await productions.list(edit.editId);
+  assert.equal(jobs.length, 1); assert.equal(jobs[0].status, 'interrupted');
+  assert.equal(await fs.readFile(path.join(directory, 'project/main.svml'), 'utf8'), 'Frozen author source');
+  assert.equal((await store.state(edit.editId)).revision, 0);
+  await assert.rejects(productions.publish(edit.editId, { jobId: 'job_interrupted' }), { reason: 'production_not_ready' });
+});

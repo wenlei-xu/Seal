@@ -92,6 +92,11 @@ func (r *Repository) ResourceReferenceSnapshot(userID string, excludingAssetID s
 		return snapshot, err
 	}
 	snapshot.Direct = append(snapshot.Direct, history...)
+	editing, err := r.editingAssetReferences(userID, "", resourceIDs)
+	if err != nil {
+		return snapshot, err
+	}
+	snapshot.Direct = append(snapshot.Direct, editing...)
 
 	var assets []model.Asset
 	assetQuery := r.db.Where("user_id = ? AND id <> ?", userID, excludingAssetID)
@@ -280,6 +285,10 @@ func (r *Repository) ResourceReferenceSnapshot(userID string, excludingAssetID s
 }
 
 func (r *Repository) AssetBusinessReferences(userID string, assetID string) ([]ResourceDirectReference, error) {
+	editing, err := r.editingAssetReferences(userID, assetID, nil)
+	if err != nil {
+		return nil, err
+	}
 	type projectReference struct {
 		ID    string
 		Title string
@@ -310,7 +319,7 @@ func (r *Repository) AssetBusinessReferences(userID string, assetID string) ([]R
 		Scan(&candidateProjects).Error; err != nil {
 		return nil, err
 	}
-	result := make([]ResourceDirectReference, 0, len(projects)+len(shotProjects)+len(candidateProjects))
+	result := append([]ResourceDirectReference{}, editing...)
 	for _, project := range append(append(projects, shotProjects...), candidateProjects...) {
 		result = append(result, ResourceDirectReference{Kind: "项目", ID: project.ID, Title: project.Title})
 	}
@@ -395,6 +404,21 @@ func (r *Repository) DeleteAssetAndResources(userID string, assetID string, reso
 // the delete transaction so a reference added after the service snapshot cannot
 // commit with the resource rows and outbox.
 func guardAssetDeletionReferences(tx *gorm.DB, userID string, assetID string, resourceIDs []string) error {
+	if tx.Migrator().HasTable(&model.EditingAssetReference{}) {
+		var count int64
+		query := tx.Model(&model.EditingAssetReference{}).Where("user_id = ?", userID)
+		if len(resourceIDs) > 0 {
+			query = query.Where("asset_id = ? OR resource_id IN ?", assetID, resourceIDs)
+		} else {
+			query = query.Where("asset_id = ?", assetID)
+		}
+		if err := query.Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return ErrResourceCleanupStillReferenced
+		}
+	}
 	if err := guardAssetBusinessLinks(tx, assetID); err != nil {
 		return err
 	}

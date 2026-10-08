@@ -15,8 +15,8 @@ import zipfile
 
 
 def smoke(archive, platform):
-    relative = ("cli/beeftv.exe" if platform == "windows-amd64" else
-                "BeefTV.app/Contents/MacOS/cli/beeftv")
+    relative = ("cli/seal.exe" if platform == "windows-amd64" else
+                "Seal.app/Contents/MacOS/cli/seal")
     with tempfile.TemporaryDirectory(prefix="beeftv-package-smoke-") as directory:
         root = Path(directory)
         cli = root / relative
@@ -98,7 +98,7 @@ def smoke(archive, platform):
                     "protocolVersion": "2024-11-05", "capabilities": {},
                     "clientInfo": {"name": "release-smoke", "version": "1.0"}}})
                 initialized = receive(1)
-                if initialized.get("serverInfo", {}).get("name") != "beeftv":
+                if initialized.get("serverInfo", {}).get("name") != "seal":
                     raise RuntimeError("initialize did not identify beeftv")
                 send({"method": "notifications/initialized"})
                 send({"id": 2, "method": "tools/list", "params": {}})

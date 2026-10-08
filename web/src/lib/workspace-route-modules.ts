@@ -2,6 +2,7 @@ const workspaceRouteLoaders = {
     agents: () => import("@/pages/agents"),
     home: () => import("@/pages/home"),
     assets: () => import("@/pages/assets"),
+    skills: () => import("@/pages/skills"),
     canvas: () => import("@/pages/canvas"),
     create: () => import("@/pages/create"),
     projects: () => import("@/pages/projects"),

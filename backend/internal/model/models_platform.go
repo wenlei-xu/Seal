@@ -140,7 +140,13 @@ type UserSkillState struct {
 	InstalledVersionID string    `json:"installedVersionId" gorm:"size:36;index"`
 	AutoUpdate         bool      `json:"autoUpdate"`
 	Added              bool      `json:"added" gorm:"index"`
+	RuntimeEnabled     *bool     `json:"runtimeEnabled"`
 	Liked              bool      `json:"liked" gorm:"index"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`
+}
+
+type SkillRuntimeRevision struct {
+	UserID   string `gorm:"primaryKey;size:36"`
+	Revision uint64
 }

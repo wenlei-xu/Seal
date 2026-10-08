@@ -21,6 +21,7 @@ import (
 	"infinite-canvas/backend/internal/conversation"
 	"infinite-canvas/backend/internal/database"
 	"infinite-canvas/backend/internal/eagle"
+	"infinite-canvas/backend/internal/editruntime"
 	canvasHandler "infinite-canvas/backend/internal/handler"
 	"infinite-canvas/backend/internal/localapp"
 	"infinite-canvas/backend/internal/repository"
@@ -44,6 +45,7 @@ type Runtime struct {
 	uiBootstrapToken string
 	beefAPI          *beefapi.Service
 	assistantHost    *assistantruntime.Host
+	editHost         *editruntime.Host
 	listener         net.Listener
 	httpServer       *http.Server
 	serveErr         chan error
@@ -52,6 +54,25 @@ type Runtime struct {
 	closeOnce        sync.Once
 	background       sync.WaitGroup
 	closeErr         error
+}
+
+func (r *Runtime) CheckDesktopUpdateReady(ctx context.Context) error {
+	if err := r.service.CheckDesktopUpdateReady(ctx); err != nil {
+		return err
+	}
+	if r.assistantHost != nil && r.assistantHost.Running() {
+		health := r.assistantHost.Probe(ctx)
+		if !health.OK {
+			return errors.New("无法确认创作助手状态，请稍后再更新")
+		}
+		if health.Busy {
+			return errors.New("创作助手仍在工作，请等本轮制作结束再更新")
+		}
+	}
+	if r.editHost != nil {
+		return r.editHost.CheckUpdateReady(ctx)
+	}
+	return nil
 }
 
 func Open(_ context.Context, raw Config) (*Runtime, error) {
@@ -193,6 +214,7 @@ func Open(_ context.Context, raw Config) (*Runtime, error) {
 	// 本机可信凭据在组合根生成：owner 凭据与宿主凭据只在本机数据目录，0600。
 	agentops.EnsureAgentCredentials(svc.DataDir())
 	assistantHost := assistantruntime.New(assistantruntime.OptionsFromService(svc))
+	editHost := editruntime.New(cfg.DataDir)
 	api := router.Group("/api")
 	status := newSystemStatus(db, svc, true)
 	registerSystemStatusRoutes(api, status)
@@ -205,6 +227,7 @@ func Open(_ context.Context, raw Config) (*Runtime, error) {
 		Generation:         localRoot.Generation,
 		BeefAPI:            beefAPIConnection,
 		AssistantHost:      assistantHost,
+		EditHost:           editHost,
 		Conversations:      conversation.New(conversation.NewStore(repo)),
 		TextReplay:         svc.TextReplay(),
 		Appearance:         svc.AppearanceDomain(),
@@ -244,6 +267,7 @@ func Open(_ context.Context, raw Config) (*Runtime, error) {
 		uiBootstrapToken: uiBootstrapToken,
 		beefAPI:          beefAPIConnection,
 		assistantHost:    assistantHost,
+		editHost:         editHost,
 		serveErr:         make(chan error, 1),
 	}, nil
 }
@@ -406,6 +430,11 @@ func (r *Runtime) Close(ctx context.Context) error {
 			}
 		}
 		var serviceErr error
+		if r.editHost != nil {
+			if err := r.editHost.Close(ctx); err != nil {
+				failures = append(failures, err)
+			}
+		}
 		if r.localApp != nil {
 			serviceErr = r.localApp.Close()
 		} else {

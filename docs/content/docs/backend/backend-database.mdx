@@ -1,6 +1,6 @@
 ---
 title: 后端数据库
-description: BeefTV后端核心持久化表与状态边界
+description: Seal后端核心持久化表与状态边界
 ---
 
 # 后端数据库
@@ -17,7 +17,11 @@ description: BeefTV后端核心持久化表与状态边界
 
 旧版本不能读取这个加密封装。降级前须停止所有工作区写入者，恢复升级前的完整工作区备份；不能只替换可执行文件后继续写入新配置。自动更新器的二进制回滚与工作区数据恢复是不同操作。
 
-当前完整重构候选的结构版本为 v13。正式 v1.6.21 的结构版本为 v3，历史 Agent 候选曾使用 v3–v6，另有图片恢复预览分支使用 v3 或 v7；这些预览编号不能当作正式版本已发布的证据。以下旧托管数据库的 `schema_migrations` 版本历史与本地版本分开维护，不共用版本号。
+当前完整重构候选的结构版本为 v15。正式 v1.6.21 的结构版本为 v3，历史 Agent 候选曾使用 v3–v6，另有图片恢复预览分支使用 v3 或 v7；这些预览编号不能当作正式版本已发布的证据。以下旧托管数据库的 `schema_migrations` 版本历史与本地版本分开维护，不共用版本号。
+
+v14 `editing-asset-references` 追加 `editing_asset_references`，保存用户、画布、编辑工程、资产与资源的关联。导入操作身份参与引用主键，重复导入请求沿用同一引用。确认被拒绝的新导入移除引用；响应丢失或运行端结果不确定时保留，供同一操作重试确认。资产删除的服务检查和数据库删除事务均检查这些引用。引用包括可撤销的旧片段，删除轨道片段不会立即解除资产保护；当前尚未提供清理剪辑工程历史及释放引用的产品入口。这张表仅保存素材来源，不保存第二份轨道工程。
+
+v15 `standalone-editing-projects` 新增 `editing_projects`：`id` 为独立 `cut_` 工程编号，`user_id` 校验归属，`title` 保存名称，`created_at`、`updated_at` 保存工程登记时间。新建不写 `canvas_projects`，视频源和原生历史仍在编辑运行端目录保存；此表不存轨道副本。既有来源引用的 `canvas_id` 字段在独立剪辑中保存所属 `cut_` 工程编号，不代表建立画布记录。媒体只通过公共资产库导入；助手按独立工程编号保存会话与回合范围，时间线撤销由原生编辑历史负责。
 
 v13 `upload-reservation-witness` 追加 `user_upload_reservations`，以 `(user_id, identity)` 唯一索引记录未完成上传预留的日期和字节数。日额仍由 `user_daily_upload_usages` 记账，预留索引与日额增加在同一事务内完成。资源进入 READY 时与状态保存在同一事务清除索引并保留日额；进入 FAILED 或放弃时与状态保存在同一事务按索引金额和日期释放。FAILED 准入只把状态改成 PENDING，不退日额。未结算资源写成 READY 前必须持有见证，缺见证时再预留；残留 FAILED 若仍持有原见证则沿用，不二次扣额。已结算 READY 丢失物理文件时，恢复不重新预留；物理写入或最终保存失败保留原 READY 状态并返回错误，下一次恢复仍复用原资源身份及已消费额度。启动恢复：无对应资源则释放一次；PENDING 保留索引；FAILED 释放；READY 清索引且保留日额。删除 READY 资源只清索引，不把已计入日额当成孤儿退还。重复清理不再扣减其他上传的日额。分片会话文件不是配额账；查询失败时保留恢复证据并记录恢复错误。同一身份的进行中重复预留映射为上传进行中。
 
@@ -60,11 +64,11 @@ Agent 宿主在安装仓库锁定的依赖后，可从仓库根目录执行 `bun
 人工桌面验收须另行取得按候选 commit 构建的完整包。先关闭所有使用源工作区的程序，复制整个工作区到备份目录，再从备份复制一个测试目录；保留未打开过的备份。启动候选时显式设置 `CANVAS_DESKTOP_DATA_DIR` 为测试目录的绝对路径，核对启动日志及工作区内容后再操作。不得省略此变量而误用默认工作区。Windows PowerShell 示例（路径必须替换为实际独立目录）：
 
 ```powershell
-$env:CANVAS_DESKTOP_DATA_DIR = 'D:\BeefTV-tests\candidate-workspace'
-& 'D:\BeefTV-tests\candidate-app\BeefTV.exe'
+$env:CANVAS_DESKTOP_DATA_DIR = 'D:\Seal-tests\candidate-workspace'
+& 'D:\Seal-tests\candidate-app\Seal.exe'
 ```
 
-测试包应解压到新目录，保留 `BeefTV.exe`、`plugins`、`cli`、`agent-host` 完整布局，并按提供方的签名清单核对签名、大小及 SHA-256；本轮没有发布可下载包。旧 Windows 升级器不能直接接受这个布局，过渡升级器的本地方案在 `codex/product-windows-bridge-20260930`，尚未完成 Windows 真机验收或更新源部署。不要把新包只覆盖到旧目录、绕过验签或运行正式发布工作流来代替测试。
+测试包应解压到新目录，保留 `Seal.exe`、`plugins`、`cli`、`agent-host` 完整布局，并按提供方的签名清单核对签名、大小及 SHA-256；本轮没有发布可下载包。旧 Windows 升级器不能直接接受这个布局，过渡升级器的本地方案在 `codex/product-windows-bridge-20260930`，尚未完成 Windows 真机验收或更新源部署。不要把新包只覆盖到旧目录、绕过验签或运行正式发布工作流来代替测试。
 
 人工检查画布与任务历史、失败诊断、重启后输出找回、CLI/MCP 操作回放、独立音轨和字幕成片、ZIP 在空工作区导入。生成类上游调用须另行获得预算授权。回滚时退出候选，把未升级的完整备份复制到另一个新目录，再使用匹配该备份的旧包显式指向该目录；禁止旧 Agent v6 或旧整合 v8 程序打开升级后的 v9 目录。
 
@@ -108,7 +112,7 @@ $env:CANVAS_DESKTOP_DATA_DIR = 'D:\BeefTV-tests\candidate-workspace'
 
 ### 本地工作区结构（桌面形态）
 
-桌面形态使用由 `local_schema_migrations` 管理的本地结构版本（当前为 12，见 `backend/internal/database/local_schema.go`），
+桌面形态使用由 `local_schema_migrations` 管理的本地结构版本（当前为 17，见 `backend/internal/database/local_schema.go`），
 与上面的托管版本序列相互独立。版本 11 由会话工作单独占用，本序列从 10 直接进入 12。
 
 版本 3 `agent-operation-records` 为既有版本 2 工作区创建 `agent_op_records` 及用户、操作 ID 联合主键；版本 4/5 为任务的客户端操作编号补充结构；版本 6 `agent-operation-turn-attribution` 为 `agent_op_records` 增加可空的 `turn_id` 与索引，用于把内置助手一轮对话的写入回执归到该轮上。迁移只新增结构，不重写画布、项目或任务数据；结构创建与迁移记录在同一事务中提交。重复启动不会重复迁移，已成功操作的幂等结果在重启后继续回放。
@@ -180,7 +184,12 @@ $env:CANVAS_DESKTOP_DATA_DIR = 'D:\BeefTV-tests\candidate-workspace'
 | `skills` | 保存技能公开元数据、当前版本指针、来源和 GitHub 同步状态 | `instruction` 仅保留入口 `SKILL.md` 的兼容投影；目录文件不展开写入该字段 |
 | `skill_versions` | 保存每次安装、编辑或同步形成的不可变技能版本 | 记录内容哈希、入口路径、规范化 ZIP 的存储键、文件数、总大小和 GitHub commit |
 | `skill_files` | 保存某个版本的文件索引 | `(skill_version_id, path)` 唯一；只保存路径、类型、MIME、大小和 SHA-256，不保存正文 |
-| `user_skill_states` | 保存用户的加入、收藏、安装版本和自动更新选择 | 技能正文读取仍经过公开性和归属校验，不能通过文件接口绕过私有技能权限 |
+| `user_skill_states` | 保存用户的加入、收藏、安装版本、自动更新选择和可空的 `runtime_enabled` | Runtime 启停独立于旧 `added`；未设置时仅内置 Runtime Skill 默认启用 |
+| `skill_runtime_revisions` | 按 `user_id` 保存 Runtime 清单的递增版本 | 本地结构 v16；快照同时包含内容指纹，变更在下一轮对话加载 |
+| `assistant_media_proposals` | 助手提出的图片、视频、配音方案与已受理任务编号 | 本地结构 v17；保存当前用户、工程、提示词、模型键、配置版本与 Task ID；不保存密钥。界面确认后沿用任务账本的稳定操作编号，重开时复用原任务 |
+
+用户 Skill 的 `source_type` 可为 `authored`（助手沉淀）或 `github`（按用户要求下载）；下载保存真实提交、子目录和来源，版本保持不可变。原仓库的适用许可证、声明文件随选中技能保留。
+制作步骤与中间结果编号使用官方 Pi `SessionManager` 的 `beeftv.creator-workflow` 自定义条目保存，带修订号和操作回执，不增加第二套聊天数据库。记录的步骤状态属于计划，实际进度从任务或制作运行端读取。
 
 规范化技能包保存在后端数据目录的 `skill-packages/<skill-id>/<version-id>.zip`，数据库只保存索引和版本指针。上传 ZIP 时强制校验 `SKILL.md`、路径越界、软链接、重复路径、文件数量和解压大小；GitHub 技能保存公开仓库、分支、子目录和提交 SHA，后台每 6 小时检查一次开启自动更新的技能，并记录最近检查、同步时间及失败状态。
 

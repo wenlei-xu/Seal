@@ -1,0 +1,41 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createCreatorBridge } from './creator-bridge.mjs';
+
+test('creator tools keep the current turn, immutable skill activation and truthful ASR task responses', async t => {
+  const calls = [];
+  const server = http.createServer(async (req, res) => {
+    let text = ''; for await (const bytes of req) text += bytes;
+    calls.push({ path: req.url, body: JSON.parse(text), headers: req.headers });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ code: 0, data: req.url.endsWith('/propose') ? { proposalId: 'media_1', kind: 'audio', model: 'fixture', modelKey: 'fixture::fixture', prompt: 'exact text', configRevision: 1 } : req.url.endsWith('/transcribe') ? { taskId: 'asr_1', status: 'queued' } : { id: 'skill_1', formatValidated: true, behaviorVerified: false } }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const turn = { turnId: 'turn_1', proposals: [], workflowJournal: { read: () => [{ id: 'plan', steps: [{ id: 'voice' }] }] }, skillSnapshot: { skills: [{ name: 'skill-creator' }] } };
+  const bridge = createCreatorBridge({ opsUrl: `http://127.0.0.1:${server.address().port}/api`, hostToken: 'host', desktopToken: 'desktop', turnBudgetContext: new AsyncLocalStorage() });
+  const tools = bridge.buildTools('cut_project', [], {}, turn, 'same_session');
+  const tool = name => tools.find(item => item.name === name);
+  const saved = await tool('skill_author').execute('author_1', { files: { 'SKILL.md': 'draft' }, save: true, enabled: true });
+  assert.equal(JSON.parse(saved.content[0].text).behaviorVerified, false);
+  assert.equal(calls.at(-1).path, '/api/assistant/projects/cut_project/skills/author');
+  assert.equal(calls.at(-1).headers['x-beeftv-agent-turn'], 'turn_1');
+  const operationId = calls.at(-1).body.operationId;
+  await tool('skill_author').execute('author_1', { files: { 'SKILL.md': 'draft' }, save: true, enabled: true });
+  assert.equal(calls.at(-1).body.operationId, operationId);
+  const transcription = await tool('media_transcribe').execute('asr', { assetId: 'asset_1' });
+  assert.equal(JSON.parse(transcription.content[0].text).status, 'queued');
+  await tool('media_generation_propose').execute('first-turn-call', { kind: 'audio', prompt: 'exact text', workflowId: 'plan', stepId: 'voice' });
+  const generationKey = calls.at(-1).body.operationId;
+  turn.turnId = 'resumed-turn';
+  await tool('media_generation_propose').execute('different-resume-call', { kind: 'audio', prompt: 'exact text', workflowId: 'plan', stepId: 'voice' });
+  assert.equal(calls.at(-1).body.operationId, generationKey);
+  assert.equal(turn.proposals.length, 1);
+  await assert.rejects(tool('media_generation_propose').execute('unknown-step', { workflowId: 'plan', stepId: 'not-real' }), /workflow_step_not_found/);
+  turn.skillSnapshot.skills = [];
+  await assert.rejects(tool('skill_author').execute('disabled', {}), /skill_creator_disabled/);
+  const readOnly = createCreatorBridge({ readOnly: true, turnBudgetContext: new AsyncLocalStorage() }).buildTools('cut_project', [], {}, turn, 'session');
+  assert.ok(!readOnly.some(item => ['skill_author', 'skill_download', 'media_transcribe'].includes(item.name)));
+});

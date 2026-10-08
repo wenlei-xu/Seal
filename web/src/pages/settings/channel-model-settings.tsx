@@ -66,7 +66,7 @@ export function ChannelModelSettings({ channel, onChange, draft = false }: { cha
 
     const activeModelProfile = activeModel ? channel.modelProfiles?.find((item) => item.model === activeModel) : undefined;
     const inferredProtocol = activeModel ? defaultProtocolForModel(activeModel, availableProtocols) : "";
-    const activeProtocol = activeModelProfile?.protocol || inferredProtocol;
+    const activeProtocol = activeModelProfile ? activeModelProfile.protocol || "" : inferredProtocol;
     const activeCapability = activeModelProfile?.capability || modelProtocolCapability(activeProtocol, availableProtocols) || (activeModel ? inferProtocolCapabilityFromModel(activeModel) : "text");
 
     return (
@@ -82,7 +82,7 @@ export function ChannelModelSettings({ channel, onChange, draft = false }: { cha
                 {channel.models.map((rawModel) => {
                     const model = modelOptionName(rawModel);
                     const profile = channel.modelProfiles?.find((item) => item.model === model);
-                    const protocol = profile?.protocol || defaultProtocolForModel(model, availableProtocols);
+                    const protocol = profile ? profile.protocol || "" : defaultProtocolForModel(model, availableProtocols);
                     const capability = profile?.capability || modelProtocolCapability(protocol, availableProtocols) || inferProtocolCapabilityFromModel(model);
                     const displayName = profile?.displayName?.trim() || model;
                     return (
@@ -120,7 +120,7 @@ export function ChannelModelSettings({ channel, onChange, draft = false }: { cha
                 onClose={() => setActiveModel(null)}
                 footer={
                     <div className="model-editor-footer">
-                        <span className="text-xs text-foreground/50">{draft ? "完成后，点击「保存并使用」保存更改" : "更改实时保存到本地工作区"}</span>
+                        <span className="text-xs text-foreground/50">{draft ? "完成后，点击渠道弹窗的「保存」保存更改" : "更改实时保存到本地工作区"}</span>
                         <div className="model-editor-footer-actions">
                             <Popconfirm title="生成一次测试结果？" description="会向当前服务商提交真实生成任务，费用由服务商收取。结果可在任务中心查看。" okText="开始生成" cancelText="取消" onConfirm={() => { if (activeModel && activeProtocol) void testModel(activeModel, activeCapability, activeProtocol); }}>
                             <Button
@@ -167,7 +167,7 @@ export function ChannelModelSettings({ channel, onChange, draft = false }: { cha
                                     protocols={availableProtocols}
                                     onChange={(nextProtocol) => updateProfile(activeModel, {
                                         protocol: nextProtocol,
-                                        capabilityConfig: activeCapability === "image" || activeCapability === "video" ? defaultModelCapabilityConfig(nextProtocol, activeModel) : undefined,
+                                        capabilityConfig: nextProtocol === activeProtocol ? activeModelProfile?.capabilityConfig : activeCapability === "image" || activeCapability === "video" ? defaultModelCapabilityConfig(nextProtocol, activeModel) : undefined,
                                     })}
                                 />
                             </section>

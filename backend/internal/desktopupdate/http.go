@@ -66,7 +66,7 @@ func (e *Engine) getBytes(ctx context.Context, rawURL string, maxBytes int64, ti
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "BeefTV-Desktop-Updater/"+e.currentVersion)
+	req.Header.Set("User-Agent", "Seal-Desktop-Updater/"+e.currentVersion)
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return nil, classifyTransportError(err, false)
@@ -76,6 +76,9 @@ func (e *Engine) getBytes(ctx context.Context, rawURL string, maxBytes int64, ti
 		return nil, errInsecureUpdateURL
 	}
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, errNoPublishedRelease
+		}
 		return nil, classifyStatus(resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
@@ -156,7 +159,7 @@ func (e *Engine) fetchRange(ctx context.Context, artifact PlatformArtifact, path
 	if err != nil {
 		return offset, err
 	}
-	req.Header.Set("User-Agent", "BeefTV-Desktop-Updater/"+e.currentVersion)
+	req.Header.Set("User-Agent", "Seal-Desktop-Updater/"+e.currentVersion)
 	if offset > 0 {
 		req.Header.Set("Range", "bytes="+strconv.FormatInt(offset, 10)+"-")
 	}
@@ -319,7 +322,8 @@ func truncatePartial(path string) error {
 }
 
 func verifyDownloadedFile(path string, artifact PlatformArtifact) error {
-	file, err := os.Open(path)
+	// Windows requires a writable handle for Sync after integrity verification.
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}

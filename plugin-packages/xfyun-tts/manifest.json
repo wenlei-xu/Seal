@@ -1,0 +1,201 @@
+{
+  "apiVersion": "beeftv.plugin/v2",
+  "id": "xfyun-tts",
+  "name": "科大讯飞在线语音合成",
+  "version": "2.0.0",
+  "author": "BeefTV Contributors",
+  "description": "科大讯飞在线语音合成 独立请求协议插件。",
+  "documentation": "# 科大讯飞在线语音合成\n\n该目录是 BeefTV 声明式协议插件源码。后端从生成的 `xfyun-tts.beeftv-plugin` 包加载，不依赖系统内置 `host:` 适配器。\n\n本插件由 BeefTV Contributors 维护，用于适配 科大讯飞 相关服务接口；不表示 BeefTV 与该服务商存在隶属、授权或合作关系。\n\n完整接口见 [docs/interface.md](docs/interface.md)。\n\n---\n\n# 科大讯飞在线语音合成 接口字段\n\n## 协议身份\n\n- 插件 ID：`xfyun-tts`。\n- Provider ID：`xfyun-tts`。\n- 能力：`audio`。\n- 默认 Base URL：`https://tts-api.xfyun.cn`。\n- 鉴权驱动：`xfyun-ws`。\n- 创建：`POST /v2/tts`。\n- 生命周期：同步响应。\n\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n| `apiKey` | secret | 是 | API Key |\n| `secretKey` | secret | 是 | API Secret |\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n| `model` | string | 是 | `model` | 音频模型 ID。 |\n| `prompt` | string | 是 | `input` | 待合成文本。 |\n| `providerOptions` | object | 否 | `provider-specific fields` | 插件命名空间内的厂商扩展字段。 |\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n| `create.method` | `\"POST\"` |\n| `create.path` | `\"/v2/tts\"` |\n| `create.contentType` | `\"application/json\"` |\n| `create.body.common.app_id` | `{\"$ref\":\"request.providerOptions.xfyun-tts.appId\"}` |\n| `create.body.business.aue` | `\"lame\"` |\n| `create.body.business.sfl` | `1` |\n| `create.body.business.auf` | `\"audio/L16;rate=16000\"` |\n| `create.body.business.vcn` | `{\"$ref\":\"request.providerOptions.xfyun-tts.voice\"}` |\n| `create.body.business.tte` | `\"UTF8\"` |\n| `create.body.business.speed` | `{\"$toInt\":{\"$min\":[100,{\"$max\":[0,{\"$multiply\":[{\"$coalesce\":[{\"$if\":{\"condition\":{\"$ne\":[{\"$toFloat\":{\"$ref\":\"request.extra.audioSpeed\"}},0]},\"then\":{\"$toFloat\":{\"$ref\":\"request.extra.audioSpeed\"}},\"else\":null}},1]},50]}]}]}}` |\n| `create.body.data.status` | `2` |\n| `create.body.data.text` | `{\"$base64\":{\"$ref\":\"request.prompt\"}}` |\n\n## Provider 扩展键\n\n- `providerOptions.xfyun-tts.appId`\n- `providerOptions.xfyun-tts.voice`\n\n动态模型或工作流允许使用文档声明的完整 `parameters/input/extra_body` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n| `response.binaryPayload` | `true` |\n| `response.resultKind` | `\"audio\"` |\n| `response.status` | `\"succeeded\"` |\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。\n\n## 兼容边界\n\n使用在线语音合成（流式版）APPID、API Key、API Secret，不能使用讯飞其他产品的凭证。宿主使用 WSS 并计算 HMAC-SHA256 签名，签名地址不保存或返回浏览器；逐帧解码音频，完整结束后返回 MP3、16000Hz。官方文档 https://www.xfyun.cn/doc/tts/online_tts/API.html。\n\n<!-- BEEFTV_PLUGIN_MANIFEST_START -->\n## Manifest 完整接口定义\n\n以下 JSON 与插件包内实际 `manifest.json` 逐字段一致，覆盖插件身份、权限、配置、鉴权、参数、校验、创建、Agent、查询、取消、结果下载、响应和 Agent 响应映射。`documentation` 字段的值就是当前完整文档；为避免文档在自身内部无限递归，JSON 中仅用等义占位文本表示正文。\n\n```json\n{\n  \"apiVersion\": \"beeftv.plugin/v2\",\n  \"id\": \"xfyun-tts\",\n  \"name\": \"科大讯飞在线语音合成\",\n  \"version\": \"2.0.0\",\n  \"author\": \"BeefTV Contributors\",\n  \"description\": \"科大讯飞在线语音合成 独立请求协议插件。\",\n  \"documentation\": \"<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>\",\n  \"permissions\": [\n    \"generation.run\",\n    \"media.read\"\n  ],\n  \"configuration\": {\n    \"fields\": [\n      {\n        \"name\": \"apiKey\",\n        \"type\": \"secret\",\n        \"label\": \"API Key\",\n        \"required\": true\n      },\n      {\n        \"name\": \"secretKey\",\n        \"type\": \"secret\",\n        \"label\": \"API Secret\",\n        \"required\": true\n      }\n    ]\n  },\n  \"contributes\": {\n    \"providers\": [\n      {\n        \"id\": \"xfyun-tts\",\n        \"label\": \"科大讯飞在线语音合成\",\n        \"capabilities\": [\n          \"audio\"\n        ],\n        \"scopes\": [\n          \"admin.system-channel\",\n          \"user.custom-channel\",\n          \"canvas\",\n          \"creation\",\n          \"agent\"\n        ],\n        \"baseUrl\": \"https://tts-api.xfyun.cn\",\n        \"requiresPublicMediaUrls\": false,\n        \"auth\": {\n          \"type\": \"xfyun-ws\",\n          \"field\": \"apiKey\",\n          \"secretField\": \"secretKey\"\n        },\n        \"parameters\": [\n          {\n            \"name\": \"model\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"model\",\n            \"description\": \"音频模型 ID。\"\n          },\n          {\n            \"name\": \"prompt\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"input\",\n            \"description\": \"待合成文本。\"\n          },\n          {\n            \"name\": \"providerOptions\",\n            \"type\": \"object\",\n            \"required\": false,\n            \"mapping\": \"provider-specific fields\",\n            \"description\": \"插件命名空间内的厂商扩展字段。\"\n          }\n        ],\n        \"validations\": [\n          {\n            \"assert\": {\n              \"$gt\": [\n                {\n                  \"$len\": {\n                    \"$ref\": \"request.providerOptions.xfyun-tts.appId\"\n                  }\n                },\n                0\n              ]\n            },\n            \"message\": \"请填写讯飞 APPID\"\n          },\n          {\n            \"assert\": {\n              \"$gt\": [\n                {\n                  \"$len\": {\n                    \"$ref\": \"request.providerOptions.xfyun-tts.voice\"\n                  }\n                },\n                0\n              ]\n            },\n            \"message\": \"请填写讯飞控制台已开通的发音人 ID\"\n          },\n          {\n            \"assert\": {\n              \"$lt\": [\n                {\n                  \"$utf8Length\": {\n                    \"$ref\": \"request.prompt\"\n                  }\n                },\n                8000\n              ]\n            },\n            \"message\": \"讯飞单次在线合成文本必须小于 8000 字节\"\n          }\n        ],\n        \"create\": {\n          \"method\": \"POST\",\n          \"path\": \"/v2/tts\",\n          \"contentType\": \"application/json\",\n          \"body\": {\n            \"common\": {\n              \"app_id\": {\n                \"$ref\": \"request.providerOptions.xfyun-tts.appId\"\n              }\n            },\n            \"business\": {\n              \"aue\": \"lame\",\n              \"sfl\": 1,\n              \"auf\": \"audio/L16;rate=16000\",\n              \"vcn\": {\n                \"$ref\": \"request.providerOptions.xfyun-tts.voice\"\n              },\n              \"tte\": \"UTF8\",\n              \"speed\": {\n                \"$toInt\": {\n                  \"$min\": [\n                    100,\n                    {\n                      \"$max\": [\n                        0,\n                        {\n                          \"$multiply\": [\n                            {\n                              \"$coalesce\": [\n                                {\n                                  \"$if\": {\n                                    \"condition\": {\n                                      \"$ne\": [\n                                        {\n                                          \"$toFloat\": {\n                                            \"$ref\": \"request.extra.audioSpeed\"\n                                          }\n                                        },\n                                        0\n                                      ]\n                                    },\n                                    \"then\": {\n                                      \"$toFloat\": {\n                                        \"$ref\": \"request.extra.audioSpeed\"\n                                      }\n                                    },\n                                    \"else\": null\n                                  }\n                                },\n                                1\n                              ]\n                            },\n                            50\n                          ]\n                        }\n                      ]\n                    }\n                  ]\n                }\n              }\n            },\n            \"data\": {\n              \"status\": 2,\n              \"text\": {\n                \"$base64\": {\n                  \"$ref\": \"request.prompt\"\n                }\n              }\n            }\n          },\n          \"audioStream\": {\n            \"transport\": \"websocket\",\n            \"audioPath\": \"data.audio\",\n            \"codePath\": \"code\",\n            \"donePath\": \"data.status\",\n            \"doneValue\": 2\n          }\n        },\n        \"response\": {\n          \"binaryPayload\": true,\n          \"resultKind\": \"audio\",\n          \"status\": \"succeeded\"\n        }\n      }\n    ]\n  }\n}\n```\n<!-- BEEFTV_PLUGIN_MANIFEST_END -->\n",
+  "permissions": [
+    "generation.run",
+    "media.read"
+  ],
+  "configuration": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "type": "secret",
+        "label": "API Key",
+        "required": true
+      },
+      {
+        "name": "secretKey",
+        "type": "secret",
+        "label": "API Secret",
+        "required": true
+      }
+    ]
+  },
+  "contributes": {
+    "providers": [
+      {
+        "id": "xfyun-tts",
+        "label": "科大讯飞在线语音合成",
+        "capabilities": [
+          "audio"
+        ],
+        "scopes": [
+          "admin.system-channel",
+          "user.custom-channel",
+          "canvas",
+          "creation",
+          "agent"
+        ],
+        "baseUrl": "https://tts-api.xfyun.cn",
+        "requiresPublicMediaUrls": false,
+        "auth": {
+          "type": "xfyun-ws",
+          "field": "apiKey",
+          "secretField": "secretKey"
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "type": "string",
+            "required": true,
+            "mapping": "model",
+            "description": "音频模型 ID。"
+          },
+          {
+            "name": "prompt",
+            "type": "string",
+            "required": true,
+            "mapping": "input",
+            "description": "待合成文本。"
+          },
+          {
+            "name": "providerOptions",
+            "type": "object",
+            "required": false,
+            "mapping": "provider-specific fields",
+            "description": "插件命名空间内的厂商扩展字段。"
+          }
+        ],
+        "validations": [
+          {
+            "assert": {
+              "$gt": [
+                {
+                  "$len": {
+                    "$ref": "request.providerOptions.xfyun-tts.appId"
+                  }
+                },
+                0
+              ]
+            },
+            "message": "请填写讯飞 APPID"
+          },
+          {
+            "assert": {
+              "$gt": [
+                {
+                  "$len": {
+                    "$ref": "request.providerOptions.xfyun-tts.voice"
+                  }
+                },
+                0
+              ]
+            },
+            "message": "请填写讯飞控制台已开通的发音人 ID"
+          },
+          {
+            "assert": {
+              "$lt": [
+                {
+                  "$utf8Length": {
+                    "$ref": "request.prompt"
+                  }
+                },
+                8000
+              ]
+            },
+            "message": "讯飞单次在线合成文本必须小于 8000 字节"
+          }
+        ],
+        "create": {
+          "method": "POST",
+          "path": "/v2/tts",
+          "contentType": "application/json",
+          "body": {
+            "common": {
+              "app_id": {
+                "$ref": "request.providerOptions.xfyun-tts.appId"
+              }
+            },
+            "business": {
+              "aue": "lame",
+              "sfl": 1,
+              "auf": "audio/L16;rate=16000",
+              "vcn": {
+                "$ref": "request.providerOptions.xfyun-tts.voice"
+              },
+              "tte": "UTF8",
+              "speed": {
+                "$toInt": {
+                  "$min": [
+                    100,
+                    {
+                      "$max": [
+                        0,
+                        {
+                          "$multiply": [
+                            {
+                              "$coalesce": [
+                                {
+                                  "$if": {
+                                    "condition": {
+                                      "$ne": [
+                                        {
+                                          "$toFloat": {
+                                            "$ref": "request.extra.audioSpeed"
+                                          }
+                                        },
+                                        0
+                                      ]
+                                    },
+                                    "then": {
+                                      "$toFloat": {
+                                        "$ref": "request.extra.audioSpeed"
+                                      }
+                                    },
+                                    "else": null
+                                  }
+                                },
+                                1
+                              ]
+                            },
+                            50
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "data": {
+              "status": 2,
+              "text": {
+                "$base64": {
+                  "$ref": "request.prompt"
+                }
+              }
+            }
+          },
+          "audioStream": {
+            "transport": "websocket",
+            "audioPath": "data.audio",
+            "codePath": "code",
+            "donePath": "data.status",
+            "doneValue": 2
+          }
+        },
+        "response": {
+          "binaryPayload": true,
+          "resultKind": "audio",
+          "status": "succeeded"
+        }
+      }
+    ]
+  }
+}

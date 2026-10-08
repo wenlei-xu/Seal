@@ -33,6 +33,6 @@ func (b staticBrand) NameAndSlug() (string, string) {
 }
 
 const (
-	defaultBrandName = "BeefTV"
+	defaultBrandName = "Seal"
 	defaultBrandSlug = "beeftv"
 )

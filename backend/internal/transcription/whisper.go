@@ -27,8 +27,11 @@ type whisperVerboseJSON struct {
 }
 
 type Client struct {
-	BaseURL string
-	HTTP    *http.Client
+	BaseURL  string
+	HTTP     *http.Client
+	APIKey   string
+	Model    string
+	Endpoint string
 }
 
 func NewClient(baseURL string) *Client {
@@ -40,7 +43,7 @@ func NewClient(baseURL string) *Client {
 
 func (c *Client) Transcribe(ctx context.Context, wavPath string, language string) ([]Segment, string, error) {
 	if c == nil || c.BaseURL == "" {
-		return nil, "", fmt.Errorf("本地转写服务未配置：请设置 %s", BaseURLEnv)
+		return transcribeLocal(ctx, wavPath, language)
 	}
 	httpClient := c.HTTP
 	if httpClient == nil {
@@ -63,6 +66,11 @@ func (c *Client) Transcribe(ctx context.Context, wavPath string, language string
 	if err := writer.WriteField("response_format", "verbose_json"); err != nil {
 		return nil, "", err
 	}
+	if c.Endpoint != "" && c.Model != "" {
+		if err := writer.WriteField("model", c.Model); err != nil {
+			return nil, "", err
+		}
+	}
 	if strings.TrimSpace(language) != "" {
 		if err := writer.WriteField("language", strings.TrimSpace(language)); err != nil {
 			return nil, "", err
@@ -72,19 +80,25 @@ func (c *Client) Transcribe(ctx context.Context, wavPath string, language string
 		return nil, "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/inference", &body)
+	endpoint := c.Endpoint
+	if endpoint == "" {
+		endpoint = "/inference"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+endpoint, &body)
 	if err != nil {
 		return nil, "", err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if c.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("无法连接本地转写服务(whisper.cpp): %w", err)
+		return nil, "", fmt.Errorf("无法连接转写服务，请检查地址与网络")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, "", fmt.Errorf("本地转写服务返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+		return nil, "", fmt.Errorf("转写服务返回 %d，请检查密钥、模型及服务配额", resp.StatusCode)
 	}
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {

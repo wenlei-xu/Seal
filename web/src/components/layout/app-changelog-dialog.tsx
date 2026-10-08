@@ -1,12 +1,18 @@
 import { motion, useReducedMotion } from "motion/react";
 import { ScrollText } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { Button, Checkbox } from 'antd';
+import { useDesktopUpdate } from '@/hooks/use-desktop-update';
+import { useDesktopUpdatePreferences } from '@/stores/use-desktop-update-preferences';
 
 import { AppModal } from "@/components/ui/product/app-modal/app-modal";
 import { aceternityMotion } from "@/lib/aceternity-motion";
 
 export function AppChangelogDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     const reducedMotion = useReducedMotion();
+    const updater = useDesktopUpdate();
+    const preferences = useDesktopUpdatePreferences();
+    const busy = updater.actionBusy || updater.persistBusy || ['checking', 'downloading', 'installing'].includes(updater.state.status);
     const version = `v${__APP_VERSION__.replace(/^v/, "")}`;
 
     return (
@@ -26,7 +32,15 @@ export function AppChangelogDialog({ open, onClose }: { open: boolean; onClose: 
             }
             open={open}
             width={820}
-            footer={null}
+            footer={updater.runtime === 'desktop' ? <div className="flex flex-wrap items-center gap-3 text-left">
+                <Checkbox checked={preferences.autoDownload} onChange={event => preferences.setAutoDownload(event.target.checked)}>自动下载更新</Checkbox>
+                <span className="min-w-0 flex-1 text-xs text-[var(--muted-foreground)]" role="status">
+                    {updater.state.error || (updater.state.status === 'ready' ? `新版 ${updater.state.latestVersion} 已下载，重启后安装` : updater.state.status === 'downloading' ? '正在后台下载，可继续创作' : updater.state.status === 'disabled' ? '当前构建未配置更新' : updater.state.releaseNotes === '尚未发布公开更新' ? '尚未发布公开更新' : updater.state.latestVersion ? `最新版本 ${updater.state.latestVersion}` : '')}
+                </span>
+                <Button disabled={busy || updater.state.status === 'disabled' || updater.state.status === 'ready'} onClick={() => void updater.check()}>检查更新</Button>
+                {updater.state.status === 'available' ? <Button onClick={() => void updater.download()}>下载更新</Button> : null}
+                {updater.state.status === 'ready' ? <Button type="primary" loading={updater.persistBusy} onClick={() => void updater.install()}>保存并重启更新</Button> : null}
+            </div> : null}
             centered
             onCancel={onClose}
             modalRender={(node) => (

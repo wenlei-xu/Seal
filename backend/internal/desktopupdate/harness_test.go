@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"infinite-canvas/backend/internal/releasebundle"
 )
 
 // GenerateTestKey returns a base64 raw 32-byte public key and the matching
@@ -58,10 +60,13 @@ func WriteZip(path string, files map[string][]byte, executable map[string]bool) 
 }
 
 func WriteDarwinLayout(root, marker string) error {
+	if err := writeEditingLayout(filepath.Join(root, appBundleName, "Contents", "Resources", "edit-host"), "darwin-arm64", marker); err != nil {
+		return err
+	}
 	if err := writeAgentLayout(filepath.Join(root, appBundleName, "Contents", "Resources", "agent-host"), "runtime/bin/node", marker); err != nil {
 		return err
 	}
-	exe := filepath.Join(root, appBundleName, "Contents", "MacOS", "BeefTV")
+	exe := filepath.Join(root, appBundleName, "Contents", "MacOS", "Seal")
 	plist := filepath.Join(root, appBundleName, "Contents", "Info.plist")
 	plugin := filepath.Join(root, appBundleName, "Contents", "Resources", pluginDirName, "official.beeftv-plugin")
 	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
@@ -88,6 +93,9 @@ func WriteDarwinLayout(root, marker string) error {
 }
 
 func WriteWindowsLayout(root, marker string) error {
+	if err := writeEditingLayout(filepath.Join(root, "edit-host"), "windows-amd64", marker); err != nil {
+		return err
+	}
 	if err := writeAgentLayout(filepath.Join(root, "agent-host"), "runtime/node.exe", marker); err != nil {
 		return err
 	}
@@ -111,24 +119,30 @@ func WriteWindowsLayout(root, marker string) error {
 
 func DarwinZipFiles(marker string) (map[string][]byte, map[string]bool) {
 	files := map[string][]byte{
-		"BeefTV.app/Contents/MacOS/BeefTV":                                     []byte("#!/bin/sh\necho " + marker + "\n"),
-		"BeefTV.app/Contents/Info.plist":                                       []byte("<plist></plist>"),
-		"BeefTV.app/Contents/Resources/plugin-packages/official.beeftv-plugin": []byte("official-" + marker),
+		"Seal.app/Contents/MacOS/Seal":                                       []byte("#!/bin/sh\necho " + marker + "\n"),
+		"Seal.app/Contents/Info.plist":                                       []byte("<plist></plist>"),
+		"Seal.app/Contents/Resources/plugin-packages/official.beeftv-plugin": []byte("official-" + marker),
 	}
-	files["BeefTV.app/Contents/MacOS/cli/beeftv"] = []byte("#!/bin/sh\necho cli-" + marker + "\n")
-	execFiles := map[string]bool{"BeefTV.app/Contents/MacOS/BeefTV": true, "BeefTV.app/Contents/MacOS/cli/beeftv": true}
+	for _, name := range releasebundle.EditingFiles("darwin-arm64") {
+		files["Seal.app/Contents/Resources/edit-host/"+name] = []byte(marker)
+	}
+	files["Seal.app/Contents/MacOS/cli/seal"] = []byte("#!/bin/sh\necho cli-" + marker + "\n")
+	execFiles := map[string]bool{"Seal.app/Contents/MacOS/Seal": true, "Seal.app/Contents/MacOS/cli/seal": true}
 	for name, body := range agentFiles("runtime/bin/node", marker) {
-		files["BeefTV.app/Contents/Resources/agent-host/"+name] = body
+		files["Seal.app/Contents/Resources/agent-host/"+name] = body
 	}
-	execFiles["BeefTV.app/Contents/Resources/agent-host/runtime/bin/node"] = true
+	execFiles["Seal.app/Contents/Resources/agent-host/runtime/bin/node"] = true
 	return files, execFiles
 }
 
 func WindowsZipFiles(marker string) (map[string][]byte, map[string]bool) {
 	files := map[string][]byte{
-		"BeefTV.exe":                             []byte("MZ-" + marker),
-		"cli/beeftv.exe":                         []byte("MZ-cli-" + marker),
+		"Seal.exe":                               []byte("MZ-" + marker),
+		"cli/seal.exe":                           []byte("MZ-cli-" + marker),
 		"plugin-packages/official.beeftv-plugin": []byte("official-" + marker),
+	}
+	for _, name := range releasebundle.EditingFiles("windows-amd64") {
+		files["edit-host/"+name] = []byte(marker)
 	}
 	for name, body := range agentFiles("runtime/node.exe", marker) {
 		files["agent-host/"+name] = body
@@ -167,4 +181,17 @@ func testPayload(version, platform, artifactURL, sha256 string, size int64, note
 			platform: {URL: artifactURL, SHA256: sha256, Size: size},
 		},
 	}
+}
+
+func writeEditingLayout(root, platform, marker string) error {
+	for _, name := range releasebundle.EditingFiles(platform) {
+		file := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(file, []byte(marker), 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }

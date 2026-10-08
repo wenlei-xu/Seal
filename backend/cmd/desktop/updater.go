@@ -66,6 +66,13 @@ func (a *DesktopApp) InstallUpdate() error {
 	if _, err := a.dialogContext(); err != nil {
 		return errors.New("应用尚未就绪，无法安装更新")
 	}
+	if runtime := a.runtime(); runtime != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := runtime.CheckDesktopUpdateReady(ctx); err != nil {
+			return err
+		}
+	}
 	return a.updater().InstallUpdate(context.Background())
 }
 

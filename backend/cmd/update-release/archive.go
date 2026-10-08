@@ -10,14 +10,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"infinite-canvas/backend/internal/releasebundle"
 )
 
 const (
 	platformDarwinARM64  = "darwin-arm64"
 	platformDarwinAMD64  = "darwin-amd64"
 	platformWindowsAMD64 = "windows-amd64"
-	macExecutableRel     = "Contents/MacOS/BeefTV"
-	windowsExecutable    = "BeefTV.exe"
+	macExecutableRel     = "Contents/MacOS/Seal"
+	windowsExecutable    = "Seal.exe"
 	pluginDirName        = "plugin-packages"
 	pluginSuffix         = ".beeftv-plugin"
 )
@@ -25,7 +27,7 @@ const (
 func cmdPackage(args []string, stdout, stderr io.Writer) error {
 	fs := newFlagSet("package", stderr)
 	platform := fs.String("platform", "", "darwin-arm64, darwin-amd64, or windows-amd64")
-	input := fs.String("input", "", "BeefTV.app, a directory containing it, or a Windows bin directory with BeefTV.exe")
+	input := fs.String("input", "", "Seal.app, a directory containing it, or a Windows bin directory with Seal.exe")
 	output := fs.String("output", "", "output zip path")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -114,14 +116,14 @@ func resolveBundleRoot(platform, input string) (string, error) {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return "", fmt.Errorf("package input must be a real directory, not a symlink")
 		}
-		if info.IsDir() && filepath.Base(abs) == "BeefTV.app" {
+		if info.IsDir() && filepath.Base(abs) == "Seal.app" {
 			return abs, nil
 		}
-		candidate := filepath.Join(abs, "BeefTV.app")
+		candidate := filepath.Join(abs, "Seal.app")
 		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
 			return candidate, nil
 		}
-		return "", fmt.Errorf("macOS package input must be BeefTV.app or a directory containing BeefTV.app")
+		return "", fmt.Errorf("macOS package input must be Seal.app or a directory containing Seal.app")
 	case platformWindowsAMD64:
 		if info.Mode().IsRegular() && strings.EqualFold(filepath.Base(abs), windowsExecutable) {
 			return filepath.Dir(abs), nil
@@ -132,7 +134,7 @@ func resolveBundleRoot(platform, input string) (string, error) {
 				return abs, nil
 			}
 		}
-		return "", fmt.Errorf("Windows package input must contain BeefTV.exe")
+		return "", fmt.Errorf("Windows package input must contain Seal.exe")
 	default:
 		return "", fmt.Errorf("unsupported platform %q", platform)
 	}
@@ -157,7 +159,21 @@ func addWindowsLayout(zw *zip.Writer, root string, visited map[string]struct{}) 
 	if err := addTree(zw, root, filepath.Join(root, "cli"), "cli", visited); err != nil {
 		return err
 	}
-	return addTree(zw, root, filepath.Join(root, "agent-host"), "agent-host", visited)
+	if err := addTree(zw, root, filepath.Join(root, "agent-host"), "agent-host", visited); err != nil {
+		return err
+	}
+	if err := addTree(zw, root, filepath.Join(root, "edit-host"), "edit-host", visited); err != nil {
+		return err
+	}
+	for _, name := range []string{"LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"} {
+		if _, err := os.Stat(filepath.Join(root, name)); os.IsNotExist(err) {
+			continue
+		}
+		if err := addTree(zw, root, filepath.Join(root, name), name, visited); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func addTree(zw *zip.Writer, bundleParent, absPath, zipName string, visited map[string]struct{}) error {
@@ -281,20 +297,31 @@ func validateArchive(platform, zipPath string) error {
 	hasMacExec := false
 	hasWinExec := false
 	hasCLI := false
-	cliPath := "cli/beeftv.exe"
+	cliPath := "cli/seal.exe"
 	if strings.HasPrefix(platform, "darwin-") {
-		cliPath = "BeefTV.app/Contents/MacOS/cli/beeftv"
+		cliPath = "Seal.app/Contents/MacOS/cli/seal"
 	}
 	pluginCount := 0
 	agentPrefix := "agent-host/"
 	nodeRelative := "runtime/node.exe"
 	if strings.HasPrefix(platform, "darwin-") {
-		agentPrefix = "BeefTV.app/Contents/Resources/agent-host/"
+		agentPrefix = "Seal.app/Contents/Resources/agent-host/"
 		nodeRelative = "runtime/bin/node"
 	}
 	requiredAgent := map[string]bool{"server.mjs": false, "session-identity.mjs": false, "package.json": false, nodeRelative: false, "node_modules/@earendil-works/pi-coding-agent/package.json": false}
+	editPrefix := "edit-host/"
+	if strings.HasPrefix(platform, "darwin-") {
+		editPrefix = "Seal.app/Contents/Resources/edit-host/"
+	}
+	requiredEdit := map[string]bool{}
+	for _, name := range releasebundle.EditingFiles(platform) {
+		requiredEdit[editPrefix+name] = false
+	}
 	for _, file := range reader.File {
 		name := filepath.ToSlash(file.Name)
+		if _, required := requiredEdit[name]; required && file.Mode().IsRegular() && file.UncompressedSize64 > 0 {
+			requiredEdit[name] = true
+		}
 		if name == cliPath {
 			if !file.Mode().IsRegular() || file.UncompressedSize64 == 0 {
 				return fmt.Errorf("bundled CLI must be a nonempty regular file: %s", cliPath)
@@ -326,21 +353,26 @@ func validateArchive(platform, zipPath string) error {
 			return fmt.Errorf("zip entry %s is user database data and cannot ship in an updater archive", name)
 		}
 		switch {
-		case name == "BeefTV.app/"+macExecutableRel || name == "BeefTV.app/"+macExecutableRel+"/":
+		case name == "Seal.app/"+macExecutableRel || name == "Seal.app/"+macExecutableRel+"/":
 			hasMacExec = true
 			if file.Mode()&0o111 == 0 {
-				return fmt.Errorf("BeefTV.app/%s must retain executable mode", macExecutableRel)
+				return fmt.Errorf("Seal.app/%s must retain executable mode", macExecutableRel)
 			}
 		case name == windowsExecutable:
 			hasWinExec = true
 		case strings.HasPrefix(name, pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
 			pluginCount++
-		case strings.HasPrefix(name, "BeefTV.app/Contents/Resources/"+pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
+		case strings.HasPrefix(name, "Seal.app/Contents/Resources/"+pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
 			pluginCount++
 		}
 	}
 	if !hasCLI {
 		return fmt.Errorf("archive missing bundled CLI: %s", cliPath)
+	}
+	for name, found := range requiredEdit {
+		if !found {
+			return fmt.Errorf("archive missing editing runtime: %s", name)
+		}
 	}
 	for name, found := range requiredAgent {
 		if !found {
@@ -353,14 +385,14 @@ func validateArchive(platform, zipPath string) error {
 			return fmt.Errorf("macOS archive must not contain %s", windowsExecutable)
 		}
 		if !hasMacExec {
-			return fmt.Errorf("macOS archive must contain BeefTV.app/%s", macExecutableRel)
+			return fmt.Errorf("macOS archive must contain Seal.app/%s", macExecutableRel)
 		}
 		if pluginCount == 0 {
 			return fmt.Errorf("macOS archive must contain Contents/Resources/%s/*%s", pluginDirName, pluginSuffix)
 		}
 	case platformWindowsAMD64:
 		if hasMacExec {
-			return fmt.Errorf("Windows archive must not contain BeefTV.app")
+			return fmt.Errorf("Windows archive must not contain Seal.app")
 		}
 		if !hasWinExec {
 			return fmt.Errorf("Windows archive must contain %s at the zip root", windowsExecutable)
@@ -403,10 +435,10 @@ func rejectUserDataDir(root string) error {
 		return err
 	}
 	slash := filepath.ToSlash(abs)
-	if strings.Contains(slash, "/Application Support/BeefTV") && !strings.Contains(slash, "BeefTV.app") {
+	if (strings.Contains(slash, "/Application Support/Seal") && !strings.Contains(slash, "Seal.app")) || (strings.Contains(slash, "/Application Support/BeefTV") && !strings.Contains(slash, "BeefTV.app")) {
 		return fmt.Errorf("refusing to package the macOS user data directory")
 	}
-	if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(slash), "/appdata/roaming/beeftv") {
+	if runtime.GOOS == "windows" && (strings.Contains(strings.ToLower(slash), "/appdata/roaming/beeftv") || strings.Contains(strings.ToLower(slash), "/appdata/roaming/seal")) {
 		return fmt.Errorf("refusing to package the Windows user data directory")
 	}
 	return nil
@@ -475,5 +507,5 @@ func fileSHA256AndSize(path string) (string, int64, error) {
 }
 
 func artifactFileName(version, platform string) string {
-	return fmt.Sprintf("BeefTV-%s-%s.zip", version, platform)
+	return fmt.Sprintf("Seal-%s-%s.zip", version, platform)
 }

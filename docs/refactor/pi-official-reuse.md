@@ -29,8 +29,9 @@
 | `AgentSession.prompt` / `abort` / `subscribe` / `dispose` | 采用 | `prompt({ expandPromptTemplates: false, source: "rpc" })`。替换前 `await abort()` 再 `dispose()`，与 Runtime `teardownCurrent` 相同。 |
 | `AgentSessionRuntime` | 不采用 | 官方 factory 面向 cwd 发现服务；`switchSession` 用 `SessionManager.open(path, undefined)`，会丢掉本宿主按画布编码的 `sessionDir`。画布级 `customTools` 仍要重绑。显式 dispose 更短且正确。 |
 | `SettingsManager.inMemory` | 采用并显式钉值 | 压缩 `enabled/16384/20000`，重试 `3/2000/60000`，`provider.maxRetries=0`。不提高这些上限。`cacheWarming: "off"`，避免官方默认 streaming 额外打模型。 |
-| 全控 `ResourceLoader` + `createExtensionRuntime` | 采用 | 空 skills/prompts/themes/AGENTS，不读 cwd 祖先。 |
+| 全控 `ResourceLoader` + `createExtensionRuntime` | 采用 | Skills 由 Go 按用户生成的不可变轮次快照提供；SDK `loadSkills` 显式读取可信入口，`includeDefaults: false`。prompts/themes/AGENTS 为空，不读 cwd 祖先。 |
 | `noTools: "builtin"` + `customTools` | 采用 | 不暴露 read/bash/edit/write 等内置工具。 |
+| `AgentSession.reload()` | 采用 | 仅在两轮对话之间刷新 Skill 清单；保留 SessionManager 与聊天历史。自定义 `read` 仅允许当前快照中的技能文件，不提供通用磁盘读取或 shell。 |
 | `message_end` | 采用 | 本轮助手正文的权威来源。 |
 | `agent_settled` | 采用 | 自动工作结束。宿主 `turn_end` 只在 prompt 返回且观察到 settled（或 prompt 抛错）后发出。 |
 | `agent_end` | 不当前终态 | `willRetry` 时后面还有压缩恢复或重试。不映射成 `turn_end`。 |

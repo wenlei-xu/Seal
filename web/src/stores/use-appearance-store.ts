@@ -5,22 +5,22 @@ import { applySkinTheme, DEFAULT_CLASSIC_SKIN, normalizeSkinDefinition } from "@
 
 export const DEFAULT_PUBLIC_APPEARANCE: PublicAppearance = {
     schemaVersion: 7,
-    brandName: "BeefTV",
-    brandSlug: "beeftv",
+    brandName: "Seal",
+    brandSlug: "seal",
     authHeroTitle: "让一个故事，\n从文字走向银幕。",
     authHeroDescription: "",
-    logoUrl: "/beef-logo.png",
-    darkLogoUrl: "/beef-logo.png",
+    logoUrl: "/brand/seal-mark-white.svg",
+    darkLogoUrl: "/brand/seal-mark-white.svg",
     logoFrameEnabled: false,
-    authVideoUrl: "https://boss-shjd.biliapi.net/updream/aniforge/video/video_bbcb00bd-650d-4249-9346-5cd21fd2484c_m1hc-u0-1pu13x-3v1s.mp4",
-    authVideoPosterUrl: "https://i0.hdslb.com/bfs/aitool/aniforge/image/02933f26-5f1b-49ff-a811-b7f95ee5e5b8_m1hc-u0-sau.jpg",
+    authVideoUrl: "",
+    authVideoPosterUrl: "",
     authVideoAutoplay: true,
     skinId: "classic",
     activeSkin: DEFAULT_CLASSIC_SKIN,
-    seoTitle: "BeefTV",
-    seoDescription: "BeefTV，本地优先的开源 AI 视频创作工作台。",
+    seoTitle: "Seal",
+    seoDescription: "Seal，AI 视频创作工作台。",
     seoKeywords: "",
-    footerCopyright: `© ${new Date().getFullYear()} BeefTV. Open source video studio.`,
+    footerCopyright: `© ${new Date().getFullYear()} Seal.`,
     icpFilingEnabled: false,
     icpFilingNumber: "",
     logoConfigured: false,
@@ -44,6 +44,9 @@ export const useAppearanceStore = create<AppearanceStore>((set) => ({
 }));
 
 export function normalizePublicAppearance(value?: Partial<PublicAppearance> | null): PublicAppearance {
+    const legacyBrand = value?.brandName === "BeefTV" && (!value.brandSlug || value.brandSlug === "beeftv");
+    if (legacyBrand) value = { ...value, brandName: "Seal", brandSlug: "seal", seoTitle: value?.seoTitle === "BeefTV" ? "Seal" : value?.seoTitle,
+        seoDescription: value?.seoDescription?.replaceAll("BeefTV", "Seal"), footerCopyright: value?.footerCopyright?.replaceAll("BeefTV", "Seal") };
     const brandName = String(value?.brandName || "").trim();
     const brandSlug = normalizeBrandSlug(value?.brandSlug);
     const authHeroTitle = normalizeAppearanceCopy(value?.authHeroTitle, DEFAULT_PUBLIC_APPEARANCE.authHeroTitle);
@@ -157,7 +160,7 @@ export function appearanceLogoURL(appearance: PublicAppearance, theme: "light" |
 }
 
 export function brandStudioLabel(appearance: PublicAppearance) {
-    if (appearance.brandName === DEFAULT_PUBLIC_APPEARANCE.brandName && appearance.brandSlug === DEFAULT_PUBLIC_APPEARANCE.brandSlug) return "BEEF CREATIVE STUDIO";
+    if (appearance.brandName === DEFAULT_PUBLIC_APPEARANCE.brandName && appearance.brandSlug === DEFAULT_PUBLIC_APPEARANCE.brandSlug) return "SEAL CREATIVE STUDIO";
     return appearance.brandSlug.replace(/-+/g, " ").toLocaleUpperCase();
 }
 

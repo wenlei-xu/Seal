@@ -53,5 +53,12 @@ func (e *Executor) Run(ctx context.Context, resourceID, language string, progres
 	if err := reportProgress(progress, "整理字幕…", 80); err != nil {
 		return Result{}, err
 	}
-	return Result{Segments: segments, SRT: BuildSRT(segments), Language: languageOut}, nil
+	timing := "segment"
+	for _, segment := range segments {
+		if len(segment.Tokens) > 0 {
+			timing = "token"
+			break
+		}
+	}
+	return Result{Segments: segments, SRT: BuildSRT(segments), Language: languageOut, TimingLevel: timing}, nil
 }

@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Native Windows amd64 release entrypoint for the BeefTV Wails desktop app.
+    Native Windows amd64 release entrypoint for the Seal Wails desktop app.
 
 .DESCRIPTION
     Builds the same desktop source as scripts/build-beeftv-release.sh, packages
-    official *.beeftv-plugin archives next to BeefTV.exe, and fails loudly when
+    official *.beeftv-plugin archives next to Seal.exe, and fails loudly when
     CGO/go-sqlite3 compiler prerequisites are missing.
 
     This script does not install compilers, Bun, Go, Git, WebView2, or NSIS.
@@ -21,7 +21,7 @@
     - Go 1.25+ Windows CGO DWARF 5 / binutils 2.37+: https://go.dev/wiki/MinimumRequirements#cgo
 
 .OUTPUTS
-    backend\cmd\desktop\build\bin\BeefTV.exe
+    backend\cmd\desktop\build\bin\Seal.exe
     backend\cmd\desktop\build\bin\plugin-packages\*.beeftv-plugin
 #>
 [CmdletBinding()]
@@ -41,7 +41,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $desktopDir = Join-Path $repoRoot "backend\cmd\desktop"
 $pluginSourceDir = Join-Path $repoRoot "plugin-packages"
 $binDir = Join-Path $desktopDir "build\bin"
-$exePath = Join-Path $binDir "BeefTV.exe"
+$exePath = Join-Path $binDir "Seal.exe"
 $pluginResourceDir = Join-Path $binDir "plugin-packages"
 $versionFile = Join-Path $repoRoot "VERSION"
 $wailsModule = "github.com/wailsapp/wails/v2/cmd/wails@v2.16.0"
@@ -168,7 +168,7 @@ function Test-PluginZipEntries([string]$ZipPath) {
         }
         foreach ($name in $names) {
             if ($name.Contains("\")) {
-                throw "Plugin package $ZipPath entry '$name' uses backslash paths. BeefTV rejects those archives; zip entries must use forward slashes."
+                throw "Plugin package $ZipPath entry '$name' uses backslash paths. Seal rejects those archives; zip entries must use forward slashes."
             }
         }
     }
@@ -247,20 +247,10 @@ function Invoke-PluginPackageBuild {
     }
 
     $embedScript = Join-Path $pluginSourceDir "embed-documentation.mjs"
-    $bash = Get-CommandPath "bash"
-    $zip = Get-CommandPath "zip"
-    $node = Get-CommandPath "node"
-    $posixScript = Join-Path $pluginSourceDir "build-packages.sh"
-    if ($bash -and $zip -and $node) {
-        Write-Step "Building official plugin packages with plugin-packages/build-packages.sh"
-        [void](Invoke-NativeExecutable -FilePath $bash -ArgumentList @($posixScript) -FailureMessage "plugin-packages/build-packages.sh failed")
-        return
-    }
-
     Write-Step "Embedding plugin documentation with $jsRuntime"
     [void](Invoke-NativeExecutable -FilePath $jsRuntime -ArgumentList @($embedScript) -FailureMessage "plugin-packages/embed-documentation.mjs failed")
 
-    Write-Step "zip/bash/node not all available; packaging official plugins with PowerShell ZipArchive (forward-slash entries)"
+    Write-Step "Packaging official plugins with native PowerShell ZipArchive (forward-slash entries)"
     foreach ($packageDir in Get-PluginSourceDirectories) {
         $outputFile = Join-Path $pluginSourceDir ($packageDir.Name + ".beeftv-plugin")
         New-PluginZip -PackageDir $packageDir.FullName -OutputFile $outputFile
@@ -338,8 +328,8 @@ if ($sourceDirs.Count -eq 0) {
     throw "No plugin-packages/*/manifest.json sources found"
 }
 $existingPackages = @(Get-OfficialPluginPackages $pluginSourceDir)
-if ($existingPackages.Count -eq 0) {
-    Write-Step "No plugin-packages/*.beeftv-plugin artifacts found; building them"
+if ($existingPackages.Count -ne $sourceDirs.Count) {
+    Write-Step "Official plugin packages are incomplete; rebuilding them from source"
     Invoke-PluginPackageBuild
     $existingPackages = @(Get-OfficialPluginPackages $pluginSourceDir)
 }
@@ -390,7 +380,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:BEEFTV_EXTRA_LDFLAGS)) {
     $ldflags = "$ldflags $($env:BEEFTV_EXTRA_LDFLAGS.Trim())"
 }
 
-Write-Step "Building BeefTV $versionValue ($commitValue) for windows/amd64"
+Write-Step "Building Seal $versionValue ($commitValue) for windows/amd64"
 $appIconSource = Join-Path $repoRoot "assets\app-icon.png"
 $buildDir = Join-Path $desktopDir "build"
 New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
@@ -410,6 +400,9 @@ try {
         "-platform", "windows/amd64",
         "-webview2", "download",
         "-nosyncgomod",
+        # The frontend uses the explicit desktop-runtime contract; generated bindings
+        # are unused, and their generator must not launch the user's workspace.
+        "-skipbindings",
         "-m",
         "-ldflags", $ldflags
     )
@@ -436,16 +429,17 @@ if ($copied.Count -eq 0) {
 }
 
 Invoke-NativeExecutable -FilePath "bun" -ArgumentList @((Join-Path $repoRoot "scripts\package-agent-host.mjs"), "windows/amd64", (Join-Path $binDir "agent-host")) -FailureMessage "Agent host packaging failed" | Out-Null
+Invoke-NativeExecutable -FilePath "bun" -ArgumentList @((Join-Path $repoRoot "scripts\package-edit-host.mjs"), "windows/amd64", (Join-Path $binDir "edit-host")) -FailureMessage "Editing host packaging failed" | Out-Null
 
 # The beeftv CLI ships with the app. External agents (Codex, Claude Code,
 # Cursor) connect through it with their own client credential, so the installed
 # app must carry it; it is not expected on the user PATH.
 #
-# It goes in a cli subdirectory, not directly next to BeefTV.exe: Windows file
-# names are case-insensitive, so beeftv.exe beside BeefTV.exe is the same name.
+# It goes in a cli subdirectory, not directly next to Seal.exe: Windows file
+# names are case-insensitive, so beeftv.exe beside Seal.exe is the same name.
 $cliDir = Join-Path $binDir "cli"
 New-Item -ItemType Directory -Force -Path $cliDir | Out-Null
-$cliPath = Join-Path $cliDir "beeftv.exe"
+$cliPath = Join-Path $cliDir "seal.exe"
 Push-Location (Join-Path $repoRoot "backend")
 try {
     [void](Invoke-NativeExecutable -FilePath "go" -ArgumentList @("build", "-trimpath", "-ldflags", $ldflags, "-o", $cliPath, "./cmd/beeftv") -FailureMessage "beeftv CLI build failed")
@@ -458,9 +452,12 @@ if (-not (Test-Path -LiteralPath $cliPath -PathType Leaf)) {
 }
 
 Write-Host "Release executable: $exePath"
+foreach ($noticeName in @('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md')) {
+    Copy-Item -LiteralPath (Join-Path $repoRoot $noticeName) -Destination $binDir -Force
+}
 Write-Host "Bundled agent CLI: $cliPath"
 Write-Host "Official plugins: $pluginResourceDir ($($copied.Count) packages)"
-Write-Host "Launch data directory (unless CANVAS_DESKTOP_DATA_DIR is set): %AppData%\BeefTV"
+Write-Host "Launch data directory (unless CANVAS_DESKTOP_DATA_DIR is set): %AppData%\Seal"
 Write-Host "Official plugins are loaded from the executable directory, not from the process working directory."
 Write-Host "WebView2 is required at runtime; Windows 11 usually already has it. Missing runtimes use Wails -webview2 download. See https://wails.io/docs/guides/windows"
-Write-Host "This machine still has to launch BeefTV.exe before the Windows build is accepted. NSIS installer output is not produced."
+Write-Host "This machine still has to launch Seal.exe before the Windows build is accepted. NSIS installer output is not produced."

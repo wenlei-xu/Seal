@@ -38,7 +38,7 @@ func cleanupCompletedUpdates(target Target, dataDir string) error {
 	if err != nil {
 		return err
 	}
-	unlock, err := lockInstall(filepath.Join(parent, ".BeefTV.update.lock"))
+	unlock, err := lockInstall(filepath.Join(parent, ".Seal.update.lock"))
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func readCleanupRecord(path string, value any) error {
 func removeCompletedUpdate(dir string) error {
 	// Remove the helper first: Windows can still be executing it. Keep both
 	// records until payload cleanup succeeds so the next startup can retry.
-	names := []string{"BeefTV-update-helper", "BeefTV-update-helper.exe", "backup", "payload", "helper.log", "prepared", "result.json", "request.json"}
+	names := []string{"Seal-update-helper", "Seal-update-helper.exe", "backup", "payload", "helper.log", "prepared", "result.json", "request.json"}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err

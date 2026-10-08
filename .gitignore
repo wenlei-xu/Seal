@@ -52,6 +52,8 @@ backend/desktop
 backend/cmd/desktop/build/
 backend/cmd/desktop/build/bin/
 backend/cmd/desktop/frontend/wailsjs/
+# Legacy copied frontend output; production embeds only frontend/dist.
+backend/cmd/desktop/frontend/*
 !backend/cmd/desktop/frontend/dist/
 backend/cmd/desktop/frontend/dist/*
 !backend/cmd/desktop/frontend/dist/.gitkeep

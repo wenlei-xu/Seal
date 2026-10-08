@@ -33,6 +33,15 @@ func (s *Service) read() (*model.SystemSetting, Setting, error) {
 }
 
 func normalizeDocument(value Setting) Setting {
+	// Upgrade only the original default identity; uploaded assets and custom brands stay intact.
+	if strings.TrimSpace(value.BrandName) == "BeefTV" && (value.BrandSlug == "" || value.BrandSlug == "beeftv") {
+		value.BrandName, value.BrandSlug = DefaultBrandName, DefaultBrandSlug
+		if value.SEOTitle == "BeefTV" {
+			value.SEOTitle = DefaultBrandName
+		}
+		value.SEODescription = strings.ReplaceAll(value.SEODescription, "BeefTV", DefaultBrandName)
+		value.FooterCopyright = strings.ReplaceAll(value.FooterCopyright, "BeefTV", DefaultBrandName)
+	}
 	value.SchemaVersion = SchemaVersion
 	value.BrandName = strings.TrimSpace(value.BrandName)
 	if value.BrandName == "" {

@@ -2,6 +2,8 @@ package desktopupdate
 
 import "errors"
 
+var errNoPublishedRelease = errors.New("尚未发布公开更新")
+
 const (
 	StatusDisabled    = "disabled"
 	StatusIdle        = "idle"

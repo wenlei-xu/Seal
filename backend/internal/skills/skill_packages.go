@@ -118,6 +118,9 @@ func (s *Service) EnsureSkillPackages() error {
 	}
 	for index := range skills {
 		skill := &skills[index]
+		if skill.SourceType == "runtime-builtin" {
+			continue
+		}
 		archive, err := archiveFromMarkdown([]byte(skill.Instruction), skill.Name, skill.Description)
 		if err != nil {
 			return fmt.Errorf("迁移技能 %s 文件包失败: %w", skill.ID, err)
@@ -290,7 +293,7 @@ func (s *Service) updateSingleMarkdownSkill(skill *model.Skill, req SkillMutatio
 	return s.addSkillArchiveVersion(skill, archive, "markdown", req.MarkdownURL, "", "", "", false)
 }
 
-func (s *Service) createSkillFromArchive(userID string, archive skillPackageArchive, req SkillInstallRequest, sourceType string, sourceURL string, sourceRef string, sourceSubdir string, sourceCommit string, autoUpdate bool) (*SkillItem, error) {
+func (s *Service) createSkillFromArchive(userID string, archive skillPackageArchive, req SkillInstallRequest, sourceType string, sourceURL string, sourceRef string, sourceSubdir string, sourceCommit string, autoUpdate bool, runtimeEnabled ...bool) (*SkillItem, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		name = archive.Metadata.Name
@@ -332,6 +335,9 @@ func (s *Service) createSkillFromArchive(userID string, archive skillPackageArch
 		Status: skillStatusEnabled, Source: skillSourceUser, Tag: tag, IsPrivate: req.IsPrivate, MarkdownURL: sourceURL, ShowcaseMediaJSON: "[]",
 	}
 	state := &model.UserSkillState{ID: kernel.NewID(), UserID: userID, SkillID: skillID, Added: true, InstalledVersionID: versionID, AutoUpdate: autoUpdate}
+	if len(runtimeEnabled) != 0 {
+		state.RuntimeEnabled = &runtimeEnabled[0]
+	}
 	if err := s.repo.CreateSkillWithPackage(skill, version, files, state); err != nil {
 		_ = os.Remove(filepath.Join(s.dataDir, "skill-packages", filepath.FromSlash(packageKey)))
 		return nil, err
@@ -586,7 +592,7 @@ func archiveFromMarkdown(data []byte, fallbackName string, fallbackDescription s
 	return finalizeSkillArchive(files, metadata)
 }
 
-func archiveFromZip(data []byte, subdir string) (skillPackageArchive, error) {
+func archiveFromZip(data []byte, subdir string, metadataOverride ...skillPackageMetadata) (skillPackageArchive, error) {
 	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return skillPackageArchive{}, kernel.BadAuthRequest("ZIP 文件无法解析")
@@ -642,6 +648,9 @@ func archiveFromZip(data []byte, subdir string) (skillPackageArchive, error) {
 		return skillPackageArchive{}, err
 	}
 	metadata := parseSkillPackageMetadata(files["SKILL.md"])
+	if len(metadataOverride) != 0 {
+		metadata = metadataOverride[0]
+	}
 	return finalizeSkillArchive(files, metadata)
 }
 
@@ -668,6 +677,7 @@ func normalizeSkillArchiveRoot(raw map[string][]byte, subdir string) (map[string
 			raw = next
 		}
 	}
+	inheritedNotices := map[string][]byte{}
 	subdir = strings.Trim(strings.ReplaceAll(strings.TrimSpace(subdir), "\\", "/"), "/")
 	if subdir != "" {
 		normalized, err := normalizeSkillPath(subdir)
@@ -679,6 +689,12 @@ func normalizeSkillArchiveRoot(raw map[string][]byte, subdir string) (map[string
 		for filePath, content := range raw {
 			if strings.HasPrefix(filePath, prefix) {
 				filtered[strings.TrimPrefix(filePath, prefix)] = content
+			} else {
+				base := strings.ToUpper(path.Base(filePath))
+				parent := path.Dir(filePath)
+				if (parent == "." || strings.HasPrefix(prefix, parent+"/")) && (base == "LICENSE" || strings.HasPrefix(base, "LICENSE.") || base == "COPYING" || base == "NOTICE") {
+					inheritedNotices["references/upstream-notices/"+filePath] = content
+				}
 			}
 		}
 		if len(filtered) == 0 {
@@ -713,6 +729,12 @@ func normalizeSkillArchiveRoot(raw map[string][]byte, subdir string) (map[string
 			filePath = strings.TrimPrefix(filePath, prefix)
 		}
 		files[filePath] = content
+	}
+	for name, content := range inheritedNotices {
+		if _, exists := files[name]; exists {
+			return nil, kernel.BadAuthRequest("技能包声明文件路径冲突")
+		}
+		files[name] = content
 	}
 	if len(files) > maxSkillPackageFiles {
 		return nil, kernel.BadAuthRequest("技能包文件数量不能超过 512 个")

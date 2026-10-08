@@ -9,11 +9,13 @@ import type { TimelineProject } from "@/types/timeline";
 export type TimelineTranscriptionCreateRequest = {
     resourceId: string;
     language?: string;
+    route?: 'local' | 'service';
     projectId?: string;
     clientOperationId?: string;
 };
 
 export type TimelineTranscriptionResult = {
+    timingLevel?: 'segment' | 'token';
     segments: TimelineTranscriptionSegment[];
     srt?: string;
     language?: string;
@@ -23,6 +25,7 @@ export type TimelineTranscriptionSegment = {
     startMs: number;
     endMs: number;
     text: string;
+    tokens?: Array<{ startMs: number; endMs: number; text: string; probability: number }>;
 };
 
 export async function createTimelineTranscriptionTask(

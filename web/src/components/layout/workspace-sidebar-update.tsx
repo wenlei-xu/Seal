@@ -46,7 +46,7 @@ export function WorkspaceSidebarUpdate({ collapsed }: { collapsed: boolean }) {
     const busy = persistBusy || actionBusy || state.status === "downloading" || state.status === "installing";
     const percent = desktopUpdateProgressPercent(state);
     const resumable = hasResumableDesktopUpdate(state);
-    const actionLabel = persistBusy ? "正在保存" : state.status === "available" ? "下载并安装更新" : desktopUpdateActionLabel(state.status);
+    const actionLabel = persistBusy ? "正在保存" : state.status === "available" ? "后台下载更新" : state.status === "ready" ? "保存并重启更新" : desktopUpdateActionLabel(state.status);
     const errorText = state.status === "error" ? userFacingDesktopUpdateError(state.error) : "";
     const updateLabel = state.status === "error" ? `${errorText}，${resumable ? "点击继续下载" : "点击重试"}` : latest ? `${actionLabel} ${latest}` : actionLabel;
     const line = showControls && !collapsed ? statusLine(state, persistBusy, latest, percent) : null;
@@ -88,7 +88,7 @@ export function WorkspaceSidebarUpdate({ collapsed }: { collapsed: boolean }) {
                             <LoaderCircle className="size-4 animate-spin" strokeWidth={1.8} aria-hidden="true" />
                         </span>
                     ) : (
-                        <button type="button" className="app-workspace-update-action" onClick={() => void updater.downloadAndInstall()} aria-label={updateLabel} title={updateLabel}>
+                        <button type="button" className="app-workspace-update-action" onClick={() => void (state.status === "error" ? updater.retry() : state.status === "ready" ? updater.install() : updater.download())} aria-label={updateLabel} title={updateLabel}>
                             {state.status === "error" ? <RotateCcw className="size-4" strokeWidth={1.8} aria-hidden="true" /> : <Download className="size-4" strokeWidth={1.8} aria-hidden="true" />}
                         </button>
                     )}

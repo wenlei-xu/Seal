@@ -30,7 +30,8 @@ jobs:
       - name: Require official main and unused runtime tag
         run: |
           set -euo pipefail
-          test "$GITHUB_REPOSITORY" = glanderness/BeefTV
+          test -n "${{ vars.SEAL_RELEASE_REPOSITORY }}"
+          test "$GITHUB_REPOSITORY" = "${{ vars.SEAL_RELEASE_REPOSITORY }}"
           test "$GITHUB_REF" = refs/heads/main
           if gh release view depth-runtime-v2 >/dev/null 2>&1 || git ls-remote --exit-code origin refs/tags/depth-runtime-v2 >/dev/null 2>&1; then
             echo 'Runtime release already exists; immutable assets cannot be overwritten.'
@@ -60,9 +61,9 @@ jobs:
         run: |
           set -euo pipefail
           cat > "$RUNNER_TEMP/notes.md" <<'EOF'
-          Windows x64 optional depth-video runtime for BeefTV v1.6.12 and later.
+          Windows x64 optional depth-video runtime for Seal v1.6.12 and later.
 
-          CPU inference has been tested on a Windows AMD machine with 2-second and 15-second clips. CUDA packages pass build and relocation checks; real NVIDIA GPU inference is a community testing preview. CUDA device failures fall back to CPU once. CPU processing can be slow and memory intensive. Please include GPU, driver version, BeefTV version and task diagnostics when reporting issues.
+          CPU inference has been tested on a Windows AMD machine with 2-second and 15-second clips. CUDA packages pass build and relocation checks; real NVIDIA GPU inference is a community testing preview. CUDA device failures fall back to CPU once. CPU processing can be slow and memory intensive. Please include GPU, driver version, Seal version and task diagnostics when reporting issues.
 
           Packages and the Small model are downloaded on first use. The signed manifest verifies every archive and CUDA part. These are optional components, not desktop installers.
           EOF

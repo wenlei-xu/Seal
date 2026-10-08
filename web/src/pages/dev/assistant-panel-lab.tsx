@@ -42,6 +42,7 @@ function stubController(open: boolean, setOpen: (next: boolean) => void, width: 
     const noop = () => {};
     const asyncNoop = async () => {};
     return {
+        projectId: '',
         open,
         setOpen,
         width,
@@ -61,6 +62,7 @@ function stubController(open: boolean, setOpen: (next: boolean) => void, width: 
         reloadHistory: async () => true,
         pendingUserText: null,
         pendingSelectedNodeIds: [],
+        pendingRequestedSkill: null,
         streamed: "",
         streaming: false,
 		lifecycleNotice: null,

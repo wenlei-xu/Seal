@@ -1,11 +1,6 @@
 name: Publish container images
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -20,9 +15,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: beeftv-web
+          - image: seal-web
             dockerfile: Dockerfile
-          - image: beeftv-backend
+          - image: seal-backend
             dockerfile: backend/Dockerfile
 
     steps:
@@ -106,7 +101,7 @@ jobs:
             found && /^## / { exit }
             found { print }
           ' CHANGELOG.md > dist/RELEASE_NOTES.md
-          test -s dist/RELEASE_NOTES.md || printf 'BeefTV %s\n' "$version" > dist/RELEASE_NOTES.md
+          test -s dist/RELEASE_NOTES.md || printf 'Seal %s\n' "$version" > dist/RELEASE_NOTES.md
 
       - name: Create GitHub Release
         env:

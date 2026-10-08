@@ -85,6 +85,22 @@ func (l *Library) guardCanvasReferences(userID string, items []model.Asset, repl
 	for _, item := range items {
 		byID[item.ID] = item
 	}
+	editing, err := l.repo.EditingAssetReferences(userID)
+	if err != nil {
+		return err
+	}
+	for _, reference := range editing {
+		item, exists := byID[reference.AssetID]
+		if !exists {
+			if replacement {
+				return kernel.BadAuthRequest("素材仍被剪辑工程或撤销记录引用，不能从素材库移除")
+			}
+			continue
+		}
+		if !assetKeepsCanvasResource(item.PayloadJSON, reference.ResourceID) {
+			return kernel.BadAuthRequest("素材仍被剪辑工程或撤销记录引用，不能移除原资源")
+		}
+	}
 	canvases, err := l.repo.CanvasProjects(userID)
 	if err != nil {
 		return err

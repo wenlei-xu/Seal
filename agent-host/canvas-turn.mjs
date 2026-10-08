@@ -5,6 +5,7 @@
 // OpenAI 兼容接口，地址形状由后端按协议整理好后下发。
 
 export const SUPPORTED_APIS = ['openai-completions', 'openai-responses', 'anthropic-messages'];
+import { workflowHistory } from './workflow-journal.mjs';
 
 export function newTurnAccumulator() {
   return { turnId: '', seq: 0, toolSeq: 0, revisionBefore: 0, revisionAfter: 0,
@@ -107,7 +108,7 @@ export function turnContextPrefix({ canvasId, selectedNodeIds = [], references =
 // 密钥以环境变量引用形式传入，宿主进程内解析，不写进 auth.json。
 export function providerRegistration({ api, baseUrl, modelId, maxTokens, contextWindow }) {
   return {
-    name: 'BeefTV', baseUrl, apiKey: '$BEEFTV_AGENT_API_KEY', api,
+    name: 'Seal', baseUrl, apiKey: '$BEEFTV_AGENT_API_KEY', api,
     models: [{ id: modelId, name: modelId, reasoning: false, input: ['text'],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow, maxTokens }],
@@ -154,5 +155,5 @@ export function projectTurnHistory(entries, turnType, activeTurnId = '') {
   }
   return [...turns.values()]
     .filter((entry) => entry.finished || entry.data.turnId !== activeTurnId)
-    .map((entry) => entry.data);
+    .map((entry) => ({ ...entry.data, workflows: workflowHistory(entries).filter(item => item.turnId === entry.data.turnId) }));
 }

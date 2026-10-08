@@ -1,0 +1,25 @@
+{
+  "name": "beeftv-edit-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "acorn": "8.19.0",
+    "@hypit/hypit": "0.2.17",
+    "gsap": "3.14.2",
+    "hyperframes": "0.8.130",
+    "linkedom": "0.18.12",
+    "postcss": "8.5.8",
+    "postcss-selector-parser": "7.1.2"
+  },
+  "devDependencies": {
+    "puppeteer-core": "25.10.0"
+  },
+  "patchedDependencies": {
+    "hyperframes@0.8.130": "patches/hyperframes@0.8.130.patch"
+  }
+}

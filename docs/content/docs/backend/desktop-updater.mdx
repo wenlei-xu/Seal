@@ -1,0 +1,14 @@
+---
+title: 桌面更新
+description: Seal 桌面更新配置与发行边界
+---
+
+Seal 的默认更新地址为本仓库 GitHub Releases 中的 `desktop-update.json`，客户端内置自己的 Ed25519 公钥，支持后台下载和用户保存并重启安装。尚未发布公开稳定版时显示“尚未发布公开更新”。
+
+GitHub Actions 使用仓库 Secret `BEEFTV_UPDATER_PRIVATE_KEY` 生成签名清单，公钥来自源码中的固定文件。维护工具为 `backend/cmd/update-release`，发布流程见 `docs/desktop-release.md`。环境变量的历史命名保留用于构建兼容。
+
+发行包使用 `Seal.app` 或 `Seal.exe`，随包 CLI 放在 `cli/seal` 或 `cli/seal.exe`，插件仍使用 `.beeftv-plugin` 格式。
+
+新安装的默认数据目录为系统用户配置目录下的 `Seal`。如果已有 `BeefTV` 数据目录，继续使用该目录；更新不得搬迁、覆盖或删除工作区数据。
+
+Windows 本地预览通过 `scripts/build-editing-preview.ps1` 构建，正式 Windows 包使用 `scripts/build-beeftv-windows-release.ps1`，包含剪辑、导出和本地 ASR 运行环境。macOS 完整运行包尚未完成发行验收。

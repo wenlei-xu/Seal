@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.gif binary
+*.ico binary
+*.jpeg binary
+*.jpg binary
+*.mp4 binary
+*.png binary
+*.svg text
+*.wasm binary
+*.woff binary
+*.woff2 binary
+
+# These packages have manifests of raw upstream bytes. Preserve their hashes.
+agent-host/skills/hyperframes/official/** -text
+agent-host/skills/skill-creator/upstream/** -text
+agent-host/skills/video-use/upstream/** -text

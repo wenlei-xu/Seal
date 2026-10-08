@@ -1,0 +1,64 @@
+---
+title: 本地后端代码地图
+---
+
+# 本地后端代码地图
+
+Seal 是单用户、本地优先的桌面应用。项目、画布、素材和任务落到本地 SQLite 与工作区目录；模型生成仍可通过 Provider/Protocol 适配器访问外部 API。旧内置 Agent 已从产品运行面退场，其历史运行/偏好/记忆数据仍保留在本地数据库。
+
+## 运行链路
+
+模型服务设置由 `web/src/pages/settings/model-service-editor.tsx` 管理添加和编辑草稿；`model-service-presets.ts` 依据已启用的协议插件填写初始配置。`model-connection-test.ts` 通过正常后端生成任务验证结果。`internal/workspace/provider_config.go` 持有配置版本、保存冲突和文件读写，`internal/localcrypto` 统一工作区凭据加解密格式。
+
+```text
+Wails / local dev
+  -> internal/bootstrap        组合根、数据库、HTTP 生命周期
+  -> internal/localapp        本地能力端口
+  -> internal/{task,asset,project,workspace}
+  -> internal/app             跨域编排与尚未拆分的核心实现
+  -> internal/{generation,provider,protocol,outbound}
+  -> external model APIs
+```
+
+## 主要目录
+
+| 边界 | 位置 | 职责 |
+| --- | --- | --- |
+| 组合根 | `backend/internal/bootstrap` | 打开本地数据、组合窄服务、启停 HTTP 与 worker |
+| 本地应用 | `backend/internal/localapp` | 定义 workspace/project/asset/task/generation/provider-config 端口（旧 Agent 空端口已移除） |
+| 工作区 | `backend/internal/workspace` | 本地身份、模型配置快照；ZIP 导入导出不在此包 |
+| 任务域 | `backend/internal/task` | 本地任务命令、列表读模型、生命周期，以及本机 ffmpeg/转写/深度捕捉的准入 |
+| 生成结果交付 | `backend/internal/taskdelivery` | 第一段把生成 dataURL/字节写入本地资源并改写 ResultJSON；第二段在任务成功后物化素材。不发起新的上游生成 |
+| 生成域 | `backend/internal/generation` | 统一生成输入、引用、能力、registry 协议调度和失败归类 |
+| 供应商适配 | `backend/internal/provider`, `protocol`, `outbound` | 外部模型 API、自定义渠道和插件协议 |
+| 语音流协议 | `backend/internal/generation/audio_stream.go`，`plugin-packages/doubao-tts`，`plugin-packages/xfyun-tts` | 声明式 `create.audioStream` 描述 SSE / WebSocket 音频帧路径；宿主负责鉴权、出站限制、大小限制、取消及完整结束检测。讯飞签名查询串仅用于服务端握手，不进入日志收据或浏览器 |
+| 模型目录 | `backend/internal/modelcatalog` | 能力合同、渠道目录校验/解析/合并与 BeefAPI/WhatsToken overlay；出站 HTTP 仍走 outbound |
+| 协议插件 | `backend/internal/plugins` | registry、安装/启用和渠道设置用的 provider 能力目录；live 快照按 Runtime 隔离 |
+| Seedance 参考素材预上传 | `backend/internal/app/beefapi_seedance_preupload.go` | 仅内置 BeefAPI Seedance：本机后端把参考图片/视频/音频换成短期 HTTPS 链接后再提交 `/v1/videos`；本机文件在上传完成前保持本地引用 |
+| 数据 | `backend/internal/database`, `repository` | SQLite schema、迁移和持久化 |
+| 剪辑语义计划 | `backend/internal/editing` | 版本化时间线渲染计划：选择、顺序、空隙、裁剪、音量、字幕与输出宽高/帧率/采样率。不依赖 `internal/app`，不接受本地路径或 ffmpeg 参数 |
+| 本地助手会话 | `agent-host`, `backend/internal/assistantruntime` | 固定官方 Pi SDK；Go 管理轮次与工具身份，画布、剪辑和 Hypit 复用会话运行机制 |
+| 本地技能 | `backend/internal/skills/hub.go`, `agent-host/skills` | Skill Hub、启停、不可变轮次快照和按需读取；HyperFrames 官方资料与 CLI 固定同一版本 |
+| 独立剪辑与动效 | `backend/internal/editruntime`, `edit-host` | 所属工程控制通道；固定 HyperFrames Studio、素材与轨道工作区、文字字幕入轨、候选检查、历史撤销及冻结导出；界面接入见 `studio-product.mjs` |
+| 剪辑助手工具 | `agent-host/hyperframes-bridge.mjs`, `edit-bridge.mjs`, `hypit-bridge.mjs` | 当前时间线与选区、HTML／GSAP 作者合同、候选入轨和制作任务；不执行任意 shell、安装或云发布 |
+| HTTP | `backend/internal/handler` | 本地 `/api` 合同、输入限制和响应封装 |
+| 企业连接 | `backend/internal/beefapi` | 设备授权、本机密钥和连接状态 |
+| 本机 MCP | `backend/cmd/beeftv` | `beeftv mcp serve` 使用官方 MCP SDK，经 `/api/ops` 访问本机工作区 |
+| 桌面更新发布 | `backend/cmd/update-release` | 生成更新密钥、打包 zip、签署 `desktop-update.json` |
+| 前端 | `web/src` | React 画布、项目、素材、模型配置与插件 UI |
+
+模型配置页入口为 `web/src/pages/settings/index.tsx`：`model-channel-defaults.tsx` 按用途选择默认模型，`channel-settings-pane.tsx` 管理渠道列表与本地保存，`model-service-editor.tsx` 编辑连接和模型，`channel-model-settings.tsx` 复用插件协议及能力参数编辑。分类与保留其他模型配置的规则集中在 `web/src/lib/model-channel-settings.ts`。
+
+## 硬边界
+
+- 不提供登录、注册、计费、支付、公开分享或云存储路由。
+- 内置 BeefAPI 密钥保存在本机加密连接存储中；其他手动渠道密钥仍在本地模型配置中。密钥不进入画布快照或日志响应。
+- 外部 API 是生成能力，不是 SaaS 数据面；不得在“本地化清理”中删除 Provider、Protocol、自定义渠道或插件扩展点。
+- worker 并发策略由任务运行时管理，架构整理不得顺带改变其行为。
+
+HTTP 稳定合同见 [HTTP API](/docs/backend/http-api) 和 `backend/internal/handler/openapi.yaml`。
+
+### 同一助手的素材、技能和制作恢复
+
+`handler/assistant_creator.go` 与 `assistant_media.go` 连接 Skill Hub、ASR 和生成方案，继续校验当前工程及有效宿主轮次。`app/assistant_transcription.go` 复用现有转写任务；`transcription/local.go` 调用随 Windows 运行包提供的 CPU 模型，`runtime.go` 给出就绪状态和不含秘密的配置身份。
+`app/assistant_media.go` 经 `repository/assistant_media_proposal.go` 保存未计费的方案，界面确认后调用既有任务准入；重复确认或重开按原回执读取 Task。`agent-host/creator-bridge.mjs` 在同一 Pi 会话提供工具，`workflow-journal.mjs` 将步骤写入官方 SessionManager。前端共用 `creator-media-tasks.tsx`、`creator-workflow.tsx` 展示实际任务状态和继续入口。

@@ -1,0 +1,172 @@
+name: Release Seal desktop
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      confirm_version:
+        description: Must match VERSION, for example v1.7.7
+        required: true
+        type: string
+      publish:
+        description: Publish the verified build immediately (otherwise create a draft)
+        type: boolean
+        default: false
+concurrency:
+  group: seal-desktop-release
+  cancel-in-progress: false
+permissions:
+  contents: read
+env:
+  GOTOOLCHAIN: local
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release identity
+        id: meta
+        shell: pwsh
+        env:
+          CONFIRM_VERSION: ${{ inputs.confirm_version }}
+        run: |
+          if ($env:GITHUB_REPOSITORY -ne 'wenlei-xu/Seal') { throw 'This pipeline publishes only wenlei-xu/Seal' }
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'VERSION must be a stable version' }
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            if ($env:GITHUB_REF_NAME -ne $version) { throw 'Tag must match VERSION' }
+          } elseif ($env:CONFIRM_VERSION -ne $version) { throw 'Confirmed version must match VERSION' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "commit=$(git rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+      - name: Select bundled Node and updater public key
+        shell: pwsh
+        run: |
+          $nodeRoot = Split-Path -Parent (Get-Command node).Source
+          "BEEFTV_NODE_RUNTIME=$nodeRoot" >> $env:GITHUB_ENV
+          $public = (Get-Content backend/internal/desktopupdate/seal-update-public-key.txt -Raw).Trim()
+          "BEEFTV_UPDATER_PUBLIC_KEY=$public" >> $env:GITHUB_ENV
+      - name: Prepare pinned media tools
+        shell: pwsh
+        run: ./scripts/prepare-seal-release-runtime.ps1
+      - name: Fetch pinned Hypit Skill
+        shell: pwsh
+        run: |
+          $pin = Get-Content release/windows-runtime.json -Raw | ConvertFrom-Json
+          $destination = Join-Path $env:GITHUB_WORKSPACE '.local/cache/hypit-release-input'
+          git init $destination
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $destination remote add origin https://github.com/hypit-ai/hypit.git
+          git -C $destination fetch --depth 1 origin $pin.hypitCommit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $destination checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "BEEFTV_HYPIT_ROOT=$destination" >> $env:GITHUB_ENV
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          path-type: inherit
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils
+      - name: Prepare CGO compiler
+        shell: pwsh
+        env:
+          MSYSTEM_PREFIX: ${{ steps.msys2.outputs.msys2-location }}\ucrt64
+        run: ./scripts/assert-windows-dwarf5-cgo.ps1
+      - name: Build full Windows desktop
+        shell: pwsh
+        env:
+          CGO_ENABLED: '1'
+        run: ./scripts/build-beeftv-windows-release.ps1
+      - name: Verify and package
+        shell: pwsh
+        working-directory: backend
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          go test ./internal/desktopupdate ./cmd/update-release -count=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go run ./cmd/update-release package --platform windows-amd64 --input cmd/desktop/build/bin --output "../dist/Seal-${{ steps.meta.outputs.version }}-windows-amd64.zip"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check frozen input boundaries
+        shell: pwsh
+        run: node --test edit-host/test/frozen-inputs.test.mjs
+      - name: Real offline render from packaged tools
+        shell: pwsh
+        env:
+          BEEFTV_SHIPPED_EDIT_HOST: ${{ github.workspace }}/backend/cmd/desktop/build/bin/edit-host
+        run: node --test scripts/package-edit-host.test.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seal-windows
+          path: dist/Seal-*-windows-amd64.zip
+          if-no-files-found: error
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.build.outputs.version }}
+      COMMIT: ${{ needs.build.outputs.commit }}
+      BEEFTV_UPDATER_PRIVATE_KEY: ${{ secrets.BEEFTV_UPDATER_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/download-artifact@v4
+        with:
+          name: seal-windows
+          path: dist
+      - name: Check immutable version and signing key
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test -n "$BEEFTV_UPDATER_PRIVATE_KEY" || { echo "Configure BEEFTV_UPDATER_PRIVATE_KEY in repository Actions secrets."; exit 1; }
+          expected="$(tr -d '\r\n' < internal/desktopupdate/seal-update-public-key.txt)"
+          derived="$(go run ./cmd/update-release public-key)"
+          test "$expected" = "$derived" || { echo "Signing key does not match the embedded public key."; exit 1; }
+          if gh release view "$VERSION" --repo wenlei-xu/Seal >/dev/null 2>&1; then
+            echo "Release already exists; choose a new version. Assets are never overwritten."
+            exit 1
+          fi
+          latest="$(gh release list --repo wenlei-xu/Seal --exclude-drafts --exclude-pre-releases --limit 100 --json tagName --jq '.[].tagName')"
+          while IFS= read -r tag; do
+            if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              go run ./cmd/update-release validate-version --version "$VERSION" --greater-than "$tag"
+            fi
+          done <<< "$latest"
+      - name: Sign and verify release manifest
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          public="$(tr -d '\r\n' < internal/desktopupdate/seal-update-public-key.txt)"
+          go run ./cmd/update-release changelog --file ../SEAL_CHANGELOG.md --version "$VERSION" > ../dist/release-notes.md
+          go run ./cmd/update-release sign --version "$VERSION" --commit "$COMMIT" --notes-file ../dist/release-notes.md --expect-public-key "$public" --require-platforms windows-amd64 --asset "windows-amd64=../dist/Seal-${VERSION}-windows-amd64.zip" --output ../dist/desktop-update.json
+          go run ./cmd/update-release verify --envelope ../dist/desktop-update.json --public-key internal/desktopupdate/seal-update-public-key.txt
+          cd ../dist
+          sha256sum desktop-update.json Seal-*.zip > SHA256SUMS
+      - name: Create release draft
+        run: |
+          gh release create "$VERSION" --repo wenlei-xu/Seal --target "$COMMIT" --draft --title "Seal $VERSION" --notes-file dist/release-notes.md dist/Seal-*.zip dist/desktop-update.json dist/SHA256SUMS
+      - name: Publish when explicitly selected
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        run: gh release edit "$VERSION" --repo wenlei-xu/Seal --draft=false --latest
